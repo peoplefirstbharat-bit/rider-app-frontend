@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, TextInput, TouchableOpacity, StyleSheet, StatusBar, Alert, ActivityIndicator, ScrollView, Switch } from 'react-native';
+import { View, Text, TextInput, TouchableOpacity, StyleSheet, StatusBar, Alert, ActivityIndicator, ScrollView, Switch, Image, Linking } from 'react-native';
 
-// ⚠️ यहाँ अपने Render वाले बैकएंड का असली URL डालें (पीछे .onrender.com तक, स्लैश मत लगाना)
+// ⚠️ यहाँ अपने Render वाले बैकएंड का असली URL डालें (जैसे: https://your-app.onrender.com)
 const BACKEND_URL = "https://your-backend-name.onrender.com"; 
 
 export default function App() {
@@ -22,12 +22,13 @@ export default function App() {
   // सर्विस कंट्रोल
   const [serviceOn, setServiceOn] = useState(false);
 
-  // पेमेंट डेटा
+  // डायनामिक पेमेंट डेटा (सर्वर से आएगा)
+  const [paymentInfo, setPaymentInfo] = useState({ upiId: 'लोड हो रहा है...', upiNumber: 'लोड हो रहा है...', qrUrl: '' });
   const [utr, setUtr] = useState('');
   const [selectedPlanDays, setSelectedPlanDays] = useState(7);
-  const [planAmount, setPlanAmount] = useState(99);
+  const [planAmount, setPlanAmount] = useState(39); // नए आधे से भी कम दाम
 
-  // 1. लॉगिन फंक्शन
+  // 1. लॉगिन फंक्शन (एपि कॉल[span_1](start_span)[span_1](end_span))
   const handleLogin = async () => {
     if (phone.length !== 10 || pin.length < 4) {
       Alert.alert('गलती', 'कृपया सही 10 अंकों का नंबर और 4 अंकों का PIN डालें!');
@@ -44,7 +45,6 @@ export default function App() {
       
       if (data.success) {
         setIsSubActive(data.active);
-        // सेटिंग्स लोड करें
         if (data.data) {
           setMinFare(data.data.minFare ? data.data.minFare.toString() : '');
           setMaxDistance(data.data.maxDistance ? data.data.maxDistance.toString() : '50');
@@ -60,7 +60,7 @@ export default function App() {
     setLoading(false);
   };
 
-  // 2. रजिस्टर फंक्शन
+  // 2. रजिस्टर फंक्शन (एपि कॉल[span_2](start_span)[span_2](end_span))
   const handleRegister = async () => {
     if (phone.length !== 10 || pin.length < 4) {
       Alert.alert('गलती', 'कृपया सही 10 अंकों का नंबर और 4 अंकों का PIN डालें!');
@@ -87,7 +87,7 @@ export default function App() {
     setLoading(false);
   };
 
-  // 3. सेटिंग्स सेव करने का फंक्शन
+  // 3. सेटिंग्स सेव करने का फंक्शन (एपि कॉल[span_3](start_span)[span_3](end_span))
   const saveSettings = async () => {
     try {
       const response = await fetch(`${BACKEND_URL}/api/settings`, {
@@ -109,10 +109,23 @@ export default function App() {
     }
   };
 
-  // 4. पेमेंट रिक्वेस्ट भेजने का फंक्शन (टेलीग्राम के लिए)
+  // 4. पेमेंट पेज खुलने पर सर्वर से UPI और QR मंगाना (एपि कॉल[span_4](start_span)[span_4](end_span))
+  const fetchPaymentInfo = async () => {
+    try {
+      const response = await fetch(`${BACKEND_URL}/api/payment-info`);
+      const data = await response.json();
+      if (data.success) {
+        setPaymentInfo(data.data);
+      }
+    } catch (error) {
+      console.log('पेमेंट इन्फो फेच करने में एरर');
+    }
+  };
+
+  // 5. पेमेंट रिक्वेस्ट भेजने का फंक्शन (एपि कॉल[span_5](start_span)[span_5](end_span))
   const sendPaymentRequest = async () => {
     if (!utr || utr.length < 6) {
-      Alert.alert('गलती', 'कृपया सही UTR / Transaction ID डालें!');
+      Alert.alert('गलती', 'कृपया सही 12-अंकों का UTR / Transaction ID डालें!');
       return;
     }
     setLoading(true);
@@ -124,7 +137,7 @@ export default function App() {
       });
       const data = await response.json();
       if (data.success) {
-        Alert.alert('सफलता!', 'पेमेंट रिक्वेस्ट एडमिन के पास भेज दी गई है। जल्द ही आपका प्लान चालू हो जाएगा!');
+        Alert.alert('सफलता!', 'पेमेंट रिक्वेस्ट एडमिन के पास भेज दी गई है। अप्रूव होते ही प्लान चालू हो जाएगा!');
         setCurrentScreen('dashboard');
       } else {
         Alert.alert('एरर', data.message);
@@ -162,7 +175,7 @@ export default function App() {
     );
   }
 
-  // ================= SCREEN 2: DASHBOARD (HOME) =================
+  // ================= SCREEN 2: DASHBOARD =================
   if (currentScreen === 'dashboard') {
     return (
       <ScrollView contentContainerStyle={styles.container}>
@@ -176,8 +189,8 @@ export default function App() {
           </Text>
 
           {!isSubActive && (
-            <TouchableOpacity style={[styles.primaryButton, {backgroundColor: '#FF4444', marginBottom: 15}]} onPress={() => setCurrentScreen('payment')}>
-              <Text style={styles.buttonText}>प्लान खरीदें / एक्टिवेट कराएं</Text>
+            <TouchableOpacity style={[styles.primaryButton, {backgroundColor: '#FF4444', marginBottom: 15}]} onPress={() => { fetchPaymentInfo(); setCurrentScreen('payment'); }}>
+              <Text style={styles.buttonText}>सस्ते प्लान्स खरीदें (Buy Plan)</Text>
             </TouchableOpacity>
           )}
 
@@ -207,7 +220,7 @@ export default function App() {
     );
   }
 
-  // ================= SCREEN 3: SETTINGS & PREFERRED LOCATION =================
+  // ================= SCREEN 3: SETTINGS =================
   if (currentScreen === 'settings') {
     return (
       <ScrollView contentContainerStyle={styles.container}>
@@ -216,11 +229,11 @@ export default function App() {
         
         <View style={styles.card}>
           <Text style={styles.label}>न्यूनतम किराया (Min Fare ₹):</Text>
-          <TextInput style={styles.input} keyboardType="numeric" placeholder="जैसे: 100" placeholderTextColor="#888" value={minFare} onChangeText={setMinFare} />
+          <TextInput style={styles.input} keyboardType="numeric" placeholder="जैसे: 50" placeholderTextColor="#888" value={minFare} onChangeText={setMinFare} />
 
           <Text style={styles.label}>मनपसंद लोकेशन (Preferred Drop Location):</Text>
           <TextInput style={styles.input} placeholder="जैसे: Kanpur Central" placeholderTextColor="#888" value={preferredLocation} onChangeText={setPreferredLocation} />
-          <Text style={{color: '#888', fontSize: 12, marginBottom: 15}}>*अगर इस लोकेशन की राइड आएगी, तो ऐप किराया चेक किए बिना तुरंत उठा लेगा!</Text>
+          <Text style={{color: '#888', fontSize: 12, marginBottom: 15}}>*इस लोकेशन की राइड आने पर ऐप बिना फेयर देखे तुरंत एक्सेप्ट कर लेगा!</Text>
 
           <TouchableOpacity style={styles.primaryButton} onPress={saveSettings}>
             <Text style={styles.buttonText}>सेटिंग्स सेव करें</Text>
@@ -234,40 +247,43 @@ export default function App() {
     );
   }
 
-  // ================= SCREEN 4: PAYMENT & QR CODE =================
+  // ================= SCREEN 4: PAYMENT & DYNAMIC QR =================
   if (currentScreen === 'payment') {
     return (
       <ScrollView contentContainerStyle={styles.container}>
         <StatusBar barStyle="light-content" backgroundColor="#121212" />
-        <Text style={styles.logoText}>सब्सक्रिप्शन प्लान 💳</Text>
+        <Text style={styles.logoText}>किफायती सब्सक्रिप्शन प्लान 💳</Text>
         
         <View style={styles.card}>
-          <Text style={{color: '#fff', fontSize: 16, marginBottom: 10, textAlign: 'center'}}>अपना प्लान चुनें:</Text>
+          <Text style={{color: '#fff', fontSize: 16, marginBottom: 10, textAlign: 'center'}}>सुपर सेवर प्लान चुनें:</Text>
           
           <View style={{flexDirection: 'row', justifyContent: 'space-between', marginBottom: 15}}>
-            <TouchableOpacity style={[styles.planBox, selectedPlanDays === 1 && styles.selectedPlan]} onPress={() => { setSelectedPlanDays(1); setPlanAmount(25); }}>
+            <TouchableOpacity style={[styles.planBox, selectedPlanDays === 1 && styles.selectedPlan]} onPress={() => { setSelectedPlanDays(1); setPlanAmount(10); }}>
               <Text style={{color: '#fff', fontWeight: 'bold'}}>1 दिन</Text>
-              <Text style={{color: '#FFD700'}}>₹25</Text>
+              <Text style={{color: '#FFD700'}}>₹10</Text>
             </TouchableOpacity>
 
-            <TouchableOpacity style={[styles.planBox, selectedPlanDays === 7 && styles.selectedPlan]} onPress={() => { setSelectedPlanDays(7); setPlanAmount(99); }}>
+            <TouchableOpacity style={[styles.planBox, selectedPlanDays === 7 && styles.selectedPlan]} onPress={() => { setSelectedPlanDays(7); setPlanAmount(39); }}>
               <Text style={{color: '#fff', fontWeight: 'bold'}}>7 दिन</Text>
-              <Text style={{color: '#FFD700'}}>₹99</Text>
+              <Text style={{color: '#FFD700'}}>₹39</Text>
             </TouchableOpacity>
 
-            <TouchableOpacity style={[styles.planBox, selectedPlanDays === 30 && styles.selectedPlan]} onPress={() => { setSelectedPlanDays(30); setPlanAmount(289); }}>
+            <TouchableOpacity style={[styles.planBox, selectedPlanDays === 30 && styles.selectedPlan]} onPress={() => { setSelectedPlanDays(30); setPlanAmount(99); }}>
               <Text style={{color: '#fff', fontWeight: 'bold'}}>30 दिन</Text>
-              <Text style={{color: '#FFD700'}}>₹289</Text>
+              <Text style={{color: '#FFD700'}}>₹99</Text>
             </TouchableOpacity>
           </View>
 
-          <Text style={{color: '#FFD700', textAlign: 'center', marginBottom: 10, fontSize: 16}}>नीचे दिए गए QR कोड पर स्कैन करके पेमेंट करें:</Text>
+          <Text style={{color: '#FFD700', textAlign: 'center', marginBottom: 10, fontSize: 15}}>नीचे दिए गए UPI या QR पर पेमेंट करें:</Text>
           
-          {/* यहाँ अपना UPI QR कोड इमेज या नंबर लगा सकते हैं */}
+          {/* डायनामिक पेमेंट बॉक्स जो टेलीग्राम कमांड से अपडेट होगा */}
           <View style={styles.qrPlaceholder}>
-            <Text style={{color: '#000', fontWeight: 'bold', fontSize: 16}}>UPI QR CODE</Text>
-            <Text style={{color: '#000', fontSize: 12}}>UPI ID: yourname@upi</Text>
-            <Text style={{color: '#000', fontSize: 14, marginTop: 5}}>देय राशि: ₹{planAmount}</Text>
+            {paymentInfo.qrUrl ? (
+              <Image source={{ uri: paymentInfo.qrUrl }} style={{ width: 140, height: 140, marginBottom: 10 }} />
+            ) : null}
+            <Text style={{color: '#000', fontWeight: 'bold', fontSize: 15}}>UPI ID: {paymentInfo.upiId}</Text>
+            <Text style={{color: '#000', fontWeight: 'bold', fontSize: 14, marginTop: 3}}>UPI नंबर: {paymentInfo.upiNumber}</Text>
+            <Text style={{color: '#d32f2f', fontWeight: 'bold', fontSize: 14, marginTop: 5}}>देय राशि: ₹{planAmount}</Text>
           </View>
 
           <TextInput 
@@ -307,5 +323,5 @@ const styles = StyleSheet.create({
   row: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#2A2A2A', padding: 15, borderRadius: 8, marginVertical: 10 },
   planBox: { flex: 1, backgroundColor: '#2A2A2A', padding: 12, borderRadius: 8, alignItems: 'center', marginHorizontal: 4, borderWidth: 1, borderColor: '#444' },
   selectedPlan: { borderColor: '#FFD700', backgroundColor: '#333' },
-  qrPlaceholder: { backgroundColor: '#fff', padding: 20, borderRadius: 8, alignItems: 'center', marginVertical: 10 }
+  qrPlaceholder: { backgroundColor: '#fff', padding: 15, borderRadius: 8, alignItems: 'center', marginVertical: 10 }
 });
