@@ -1,12 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { View, Text, TextInput, TouchableOpacity, StyleSheet, StatusBar, Alert, ActivityIndicator, ScrollView, Switch, Image, Linking, Platform, NativeModules, AppState } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import DeviceInfo from 'react-native-device-info'; // ⚠️ डिवाइस बाइंडिंग के लिए
+import DeviceInfo from 'react-native-device-info'; 
 
 // ⚠️ यहाँ अपना असली बैकएंड URL डालें 
 const BACKEND_URL = "https://ride-auto-backend.onrender.com";
- 
-// जावा इंजन से जुड़ने वाला ब्रिज
 const { FilterBridge } = NativeModules;
 
 export default function App() {
@@ -27,62 +25,70 @@ export default function App() {
   const [serviceOn, setServiceOn] = useState(false);
 
   const [paymentInfo, setPaymentInfo] = useState({ upiId: 'लोड हो रहा है...', upiNumber: '...', qrUrl: '' });
-  const [plansList, setPlansList] = useState([]); // प्लान्स लिस्ट के लिए स्टेट
+  const [plansList, setPlansList] = useState([]); 
   const [utr, setUtr] = useState('');
   const [selectedPlanDays, setSelectedPlanDays] = useState(7);
   const [planAmount, setPlanAmount] = useState(39);
 
   const [perms, setPerms] = useState({ accessibility: false, overlay: false, battery: false, notifications: false });
 
+  // 🚀 Apps List with Package Names for Detection
   const [appsStatus, setAppsStatus] = useState([
-    { id: 'ola', name: 'Ola', desc: 'Cab / Auto', status: true },
-    { id: 'uber', name: 'Uber', desc: 'Cab / Moto', status: true },
-    { id: 'rapido', name: 'Rapido', desc: 'Bike taxi', status: false },
-    { id: 'indrive', name: 'inDrive', desc: 'Ride sharing', status: false },
-    { id: 'namma', name: 'Namma Yatri', desc: 'Auto / Taxi', status: false },
+    { id: 'ola', name: 'Ola', desc: 'Cab / Auto', pkg: 'com.olacabs.driver', installed: false, status: false },
+    { id: 'uber', name: 'Uber', desc: 'Cab / Moto', pkg: 'com.ubercab.driver', installed: false, status: false },
+    { id: 'rapido', name: 'Rapido', desc: 'Bike taxi', pkg: 'com.rapido.rider', installed: false, status: false },
+    { id: 'namma', name: 'Namma Yatri', desc: 'Auto / Taxi', pkg: 'in.juspay.nammayatripartner', installed: false, status: false },
+    { id: 'indrive', name: 'inDrive', desc: 'Ride sharing', pkg: 'sinet.startup.inDriver', installed: false, status: false },
+    { id: 'blusmart', name: 'BluSmart', desc: 'EV cab', pkg: 'com.blusmart.driver', installed: false, status: false },
   ]);
 
-  // 1️⃣ ऐप खुलते ही स्टेटस चेक करें
   useEffect(() => {
     checkLoginStatus();
     fetchPlans();
+    checkInstalledApps();
   }, []);
 
-  // 2️⃣ ऑटो-सिंक (Auto-Sync) - जब ऐप बैकग्राउंड से सामने आए
   useEffect(() => {
     const subscription = AppState.addEventListener('change', nextAppState => {
-      if (nextAppState === 'active' && isLoggedIn && phone) {
-        syncSubscriptionStatus();
+      if (nextAppState === 'active') {
+        if (isLoggedIn && phone) syncSubscriptionStatus();
+        checkInstalledApps();
       }
     });
-
-    return () => {
-      subscription.remove();
-    };
+    return () => subscription.remove();
   }, [isLoggedIn, phone]);
+
+  // 🚀 Native Bridge App Detection Logic
+  const checkInstalledApps = async () => {
+    if (!FilterBridge || !FilterBridge.checkAppInstalled) return;
+    
+    let updatedApps = [...appsStatus];
+    for (let i = 0; i < updatedApps.length; i++) {
+      try {
+        const isInstalled = await FilterBridge.checkAppInstalled(updatedApps[i].pkg);
+        updatedApps[i].installed = isInstalled;
+        if (!isInstalled) updatedApps[i].status = false;
+      } catch (e) { console.log(e); }
+    }
+    setAppsStatus(updatedApps);
+  };
 
   const syncSubscriptionStatus = async () => {
     try {
       const response = await fetch(`${BACKEND_URL}/api/check-subscription`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ phone })
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ phone })
       });
       const data = await response.json();
-      
       const activeStatus = Boolean(data.active);
       setIsSubActive(activeStatus);
       await AsyncStorage.setItem('is_sub_active', String(activeStatus));
 
-      // अगर सर्विस ऑन थी और प्लान खत्म हो गया, तो सर्विस बंद कर दो
       if (!activeStatus && serviceOn) {
         setServiceOn(false);
         if (FilterBridge) FilterBridge.setServiceStatus(false);
         Alert.alert('प्लान समाप्त', 'आपका प्लान या फ्री ट्रायल ख़त्म हो गया है। कृपया रीचार्ज करें।');
       }
-    } catch (error) {
-      console.log('Sync Error:', error);
-    }
+    } catch (error) {}
   };
 
   const checkLoginStatus = async () => {
@@ -98,11 +104,9 @@ export default function App() {
         if (savedMinFare) setMinFare(savedMinFare);
         if (savedLoc) setPreferredLocation(savedLoc);
         setIsLoggedIn(true);
-        
-        // लॉगिन होने पर एक बार लाइव स्टेटस ज़रूर चेक करें
         syncSubscriptionStatus();
       }
-    } catch (e) { console.log('Error reading storage'); }
+    } catch (e) {}
     setIsAppLoading(false);
   };
 
@@ -110,16 +114,12 @@ export default function App() {
     fetch(`${BACKEND_URL}/api/plans`)
       .then(res => res.json())
       .then(data => { 
-        if (data.success) {
+        if (data.success && data.data.length > 0) {
           setPlansList(data.data); 
-          // डिफ़ॉल्ट रूप से पहला प्लान सेलेक्ट कर लें
-          if(data.data.length > 0) {
-            setSelectedPlanDays(data.data[0].days);
-            setPlanAmount(data.data[0].price);
-          }
+          setSelectedPlanDays(data.data[0].days);
+          setPlanAmount(data.data[0].price);
         }
-      })
-      .catch(err => console.log('Plans Fetch Error'));
+      }).catch(() => {});
   };
 
   useEffect(() => {
@@ -127,67 +127,47 @@ export default function App() {
       fetch(`${BACKEND_URL}/api/payment-info`)
         .then(res => res.json())
         .then(data => { if (data.success) setPaymentInfo(data.data); })
-        .catch(err => console.log('Payment Info Error'));
+        .catch(() => {});
     }
   }, [showPayment]);
 
   const handleAuth = async () => {
-    if (phone.length !== 10 || pin.length < 4) return Alert.alert('गलती', 'सही 10 अंकों का नंबर और 4 अंकों का PIN डालें!');
-    
+    if (phone.length !== 10 || pin.length < 4) return Alert.alert('Error', 'Invalid Phone or PIN');
     setLoading(true);
     const endpoint = isLoginMode ? '/api/login' : '/api/register';
-    
     try {
-      // 🔒 डिवाइस ID फेच करना (Device Binding के लिए)
       let deviceId = "unknown_device";
-      try {
-        deviceId = await DeviceInfo.getUniqueId();
-      } catch (e) {
-        console.log("Device Info Error", e);
-      }
+      try { deviceId = await DeviceInfo.getUniqueId(); } catch (e) {}
 
       const response = await fetch(`${BACKEND_URL}${endpoint}`, {
-        method: 'POST', 
-        headers: { 'Content-Type': 'application/json' }, 
-        body: JSON.stringify({ phone, pin, deviceId }) // deviceId भी भेजा जा रहा है
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, 
+        body: JSON.stringify({ phone, pin, deviceId })
       });
       const data = await response.json();
       
       if (data.success) {
         if (!isLoginMode) { 
-          Alert.alert('सफल', data.message || 'अकाउंट बन गया! 24 घंटे का फ्री ट्रायल शुरू। अब लॉगिन करें।'); 
-          setIsLoginMode(true); 
+          Alert.alert('Success', 'Account Created! Login now.'); setIsLoginMode(true); 
         } else {
-          const activeStatus = Boolean(data.active);
-          setIsSubActive(activeStatus);
-          
+          setIsSubActive(Boolean(data.active));
           let mFare = data.data?.minFare ? data.data.minFare.toString() : '';
           let pLoc = data.data?.preferredLocation || '';
-          
-          setMinFare(mFare);
-          setPreferredLocation(pLoc);
+          setMinFare(mFare); setPreferredLocation(pLoc);
           
           await AsyncStorage.setItem('user_phone', phone);
-          await AsyncStorage.setItem('is_sub_active', String(activeStatus));
+          await AsyncStorage.setItem('is_sub_active', String(data.active));
           await AsyncStorage.setItem('min_fare', mFare);
           await AsyncStorage.setItem('pref_loc', pLoc);
-
           setIsLoggedIn(true);
         }
-      } else {
-        Alert.alert('एरर', data.message || 'अकाउंट नहीं मिला!');
-      }
-    } catch (error) { 
-      Alert.alert('एरर', 'सर्वर कनेक्ट नहीं हो रहा!'); 
-    }
+      } else { Alert.alert('Error', data.message); }
+    } catch (error) { Alert.alert('Error', 'Server unreachable'); }
     setLoading(false);
   };
 
   const handleLogout = async () => {
     await AsyncStorage.clear();
-    setIsLoggedIn(false);
-    setPhone('');
-    setPin('');
+    setIsLoggedIn(false); setPhone(''); setPin('');
     if (FilterBridge) FilterBridge.setServiceStatus(false);
   };
 
@@ -198,21 +178,17 @@ export default function App() {
         body: JSON.stringify({ phone, minFare: Number(minFare), preferredLocation })
       });
       const data = await response.json();
-      
       if (data.success) {
         await AsyncStorage.setItem('min_fare', minFare);
         await AsyncStorage.setItem('pref_loc', preferredLocation);
-
-        if (FilterBridge) {
-          FilterBridge.saveFilters(Number(minFare) || 0, preferredLocation || "");
-        }
-        Alert.alert('सफलता', 'फिल्टर्स सेव हो गए और इंजन में सेट हो गए!');
+        if (FilterBridge) FilterBridge.saveFilters(Number(minFare) || 0, preferredLocation || "");
+        Alert.alert('Saved', 'Filters updated!');
       }
-    } catch (error) { Alert.alert('एरर', 'सेव नहीं हुआ!'); }
+    } catch (error) { Alert.alert('Error', 'Save failed'); }
   };
 
   const sendPaymentRequest = async () => {
-    if (!utr || utr.length < 6) return Alert.alert('गलती', 'सही UTR डालें!');
+    if (!utr || utr.length < 6) return Alert.alert('Error', 'Invalid UTR');
     setLoading(true);
     try {
       const response = await fetch(`${BACKEND_URL}/api/payment-request`, {
@@ -220,41 +196,44 @@ export default function App() {
         body: JSON.stringify({ phone, utr, planDays: selectedPlanDays, amount: planAmount })
       });
       const data = await response.json();
-      if (data.success) { Alert.alert('सफलता!', 'पेमेंट रिक्वेस्ट भेज दी गई है!'); setShowPayment(false); } 
-      else Alert.alert('एरर', data.message);
-    } catch (error) { Alert.alert('एरर', 'रिक्वेस्ट फेल!'); }
+      if (data.success) { Alert.alert('Success', 'Request sent to Admin!'); setShowPayment(false); setUtr(''); } 
+      else Alert.alert('Error', data.message);
+    } catch (error) { Alert.alert('Error', 'Request failed'); }
     setLoading(false);
   };
 
+  // 🚀 Native Battery Fix implemented here
   const requestPerm = (type) => {
     if (Platform.OS !== 'android') return;
     try {
       if (type === 'accessibility') { Linking.sendIntent('android.settings.ACCESSIBILITY_SETTINGS'); setPerms({...perms, accessibility: true}); }
       else if (type === 'overlay') { Linking.sendIntent('android.settings.action.MANAGE_OVERLAY_PERMISSION'); setPerms({...perms, overlay: true}); }
-      else if (type === 'battery') { Linking.sendIntent('android.settings.IGNORE_BATTERY_OPTIMIZATION_SETTINGS'); setPerms({...perms, battery: true}); }
+      else if (type === 'battery') { 
+        if (FilterBridge && FilterBridge.requestBatteryOptimization) {
+          FilterBridge.requestBatteryOptimization(); 
+        } else {
+          Linking.sendIntent('android.settings.IGNORE_BATTERY_OPTIMIZATION_SETTINGS'); 
+        }
+        setPerms({...perms, battery: true}); 
+      }
       else if (type === 'notifications') { Linking.sendIntent('android.settings.ACTION_NOTIFICATION_LISTENER_SETTINGS'); setPerms({...perms, notifications: true}); }
     } catch (e) { Linking.openSettings(); }
   };
 
   const toggleServiceControl = (val) => {
-    if (!isSubActive) return Alert.alert('प्रतिबंध', 'प्लान एक्टिव नहीं है! कृपया रीचार्ज करें।');
-    if (val && (!perms.accessibility || !perms.overlay)) return Alert.alert('एरर', 'नीचे से Permissions चालू करें!');
-    
+    if (!isSubActive) return Alert.alert('Plan Inactive', 'Recharge to start.');
+    if (val && (!perms.accessibility || !perms.overlay)) return Alert.alert('Permissions Required', 'Enable overlay and accessibility from Permissions below!');
     setServiceOn(val);
-    
-    if (FilterBridge) {
-      FilterBridge.setServiceStatus(val);
-    }
+    if (FilterBridge) FilterBridge.setServiceStatus(val);
   };
 
-  const toggleAppStatus = (index, val) => {
+  const toggleAppStatus = (index) => {
     const newApps = [...appsStatus];
-    newApps[index].status = val;
-    setAppsStatus(newApps);
+    if (!newApps[index].installed) return; 
     
-    if (FilterBridge) {
-      FilterBridge.updateAppStatus(newApps[index].id, val);
-    }
+    newApps[index].status = !newApps[index].status;
+    setAppsStatus(newApps);
+    if (FilterBridge) FilterBridge.updateAppStatus(newApps[index].id, newApps[index].status);
   };
 
   if (isAppLoading) {
@@ -270,18 +249,11 @@ export default function App() {
     return (
       <View style={styles.container}>
         <StatusBar barStyle="light-content" backgroundColor="#0B1319" />
-        
-        {/* 🖼️ ऐप का आइकन यहाँ दिखेगा */}
         <View style={styles.authHeader}>
-          <Image 
-            source={require('./assets/logo.png')} // ⚠️ यहाँ लोगो का पाथ दिया है
-            style={styles.logoImage} 
-            resizeMode="contain"
-          />
+          <Image source={require('./assets/logo.png')} style={styles.logoImage} resizeMode="contain" />
           <Text style={styles.authLogoTxt}>Rider Accept</Text>
           <Text style={styles.authSubTxt}>Premium driver console</Text>
         </View>
-
         <View style={styles.authCard}>
           <Text style={styles.heading}>{isLoginMode ? 'Login to Rider Accept' : 'Create Account'}</Text>
           <TextInput style={styles.input} placeholder="Phone Number" placeholderTextColor="#888" keyboardType="numeric" maxLength={10} value={phone} onChangeText={setPhone} />
@@ -297,11 +269,12 @@ export default function App() {
     );
   }
 
+  // 💸 Payment View Override (Restored with Full QR Logic)
   if (showPayment) {
     return (
       <View style={styles.container}>
         <StatusBar barStyle="light-content" backgroundColor="#0B1319" />
-        <ScrollView contentContainerStyle={{padding: 20}}>
+        <ScrollView contentContainerStyle={{padding: 20, paddingBottom: 100}}>
           <Text style={[styles.heading, {fontSize: 24}]}>Activate your plan</Text>
           <Text style={{color: '#aaa', marginBottom: 20}}>Choose a plan, pay securely, and enter UTR.</Text>
           
@@ -309,13 +282,13 @@ export default function App() {
             {plansList.length > 0 ? plansList.map((plan, i) => (
               <TouchableOpacity key={i} style={[styles.planRow, selectedPlanDays === plan.days && styles.planRowActive]} onPress={() => {setSelectedPlanDays(plan.days); setPlanAmount(plan.price);}}>
                 <View>
-                  <Text style={{color: '#fff', fontSize: 16, fontWeight: 'bold'}}>{plan.name}</Text>
-                  <Text style={{color: '#aaa', fontSize: 12}}>{plan.description}</Text>
+                  <Text style={{color: selectedPlanDays === plan.days ? '#000' : '#fff', fontSize: 16, fontWeight: 'bold'}}>{plan.name}</Text>
+                  <Text style={{color: selectedPlanDays === plan.days ? '#333' : '#aaa', fontSize: 12}}>{plan.description}</Text>
                 </View>
-                <Text style={{color: '#FFD700', fontSize: 16, fontWeight: 'bold'}}>Rs {plan.price}</Text>
+                <Text style={{color: selectedPlanDays === plan.days ? '#000' : '#FFD700', fontSize: 16, fontWeight: 'bold'}}>Rs {plan.price}</Text>
               </TouchableOpacity>
             )) : (
-              <Text style={{color: '#aaa', textAlign: 'center', marginBottom: 15}}>प्लान लोड हो रहे हैं...</Text>
+              <Text style={{color: '#aaa', textAlign: 'center', marginBottom: 15}}>Loading Plans...</Text>
             )}
           </View>
 
@@ -340,33 +313,44 @@ export default function App() {
   return (
     <View style={styles.container}>
       <StatusBar barStyle="light-content" backgroundColor="#0B1319" />
+      
+      {/* Top Header */}
       <View style={styles.mainHeader}>
         <View style={{flexDirection: 'row', alignItems: 'center'}}>
-           {/* 🖼️ छोटा लोगो डैशबोर्ड हेडर में */}
            <Image source={require('./assets/logo.png')} style={{width: 30, height: 30, marginRight: 10}} resizeMode="contain" />
            <View>
-             <Text style={styles.authLogoTxt}>Rider Accept</Text>
-             <Text style={styles.authSubTxt}>Premium driver console</Text>
+             <Text style={[styles.authLogoTxt, {fontSize: 20}]}>Rider Accept</Text>
+             <Text style={[styles.authSubTxt, {fontSize: 12}]}>Premium driver console</Text>
            </View>
         </View>
-        <TouchableOpacity style={styles.profileIcon} onPress={() => setActiveTab('Profile')}><Text style={{color:'#000', fontWeight:'bold'}}>PRO</Text></TouchableOpacity>
+        <TouchableOpacity style={styles.profileIcon} onPress={() => setActiveTab('Profile')}><Text style={{color:'#fff', fontSize:12, fontWeight:'bold'}}>Profile</Text></TouchableOpacity>
       </View>
 
       <ScrollView style={{flex: 1}} contentContainerStyle={{paddingBottom: 80}}>
+        
+        {/* DASHBOARD TAB */}
         {activeTab === 'Dashboard' && (
           <View style={styles.tabContent}>
-            <View style={styles.profitCard}>
+            
+            <View style={[styles.profitCard, {borderColor: serviceOn ? '#00E676' : '#1E2A32'}]}>
               <Text style={{color: '#00E676', fontSize: 12, fontWeight: 'bold'}}>LIVE DRIVER CONSOLE</Text>
-              <Text style={{color: '#fff', fontSize: 28, fontWeight: 'bold', marginVertical: 5}}>Profit Rs 0</Text>
-              <Text style={{color: '#aaa', fontSize: 12}}>0 accepted from 0 detected orders today</Text>
-              <View style={{position: 'absolute', top: 15, right: 15, backgroundColor: serviceOn ? '#00E676' : '#FF4444', paddingHorizontal: 10, paddingVertical: 5, borderRadius: 5}}>
-                <Text style={{color: '#000', fontWeight: 'bold'}}>{serviceOn ? 'ON' : 'OFF'}</Text>
+              <Text style={{color: '#fff', fontSize: 32, fontWeight: 'bold', marginVertical: 5}}>Profit Rs 0</Text>
+              <Text style={{color: '#aaa', fontSize: 12, marginBottom: 15}}>0 accepted from 0 detected orders today</Text>
+              
+              <View style={{flexDirection: 'row', gap: 10}}>
+                <View style={styles.pillBox}><Text style={styles.pillTextTop}>STATUS</Text><Text style={styles.pillTextBottom}>{serviceOn ? 'Active' : 'Paused'}</Text></View>
+                <View style={styles.pillBox}><Text style={styles.pillTextTop}>VALUE</Text><Text style={styles.pillTextBottom}>Rs 0</Text></View>
+                <View style={styles.pillBox}><Text style={styles.pillTextTop}>RATE</Text><Text style={styles.pillTextBottom}>0%</Text></View>
               </View>
+
+              <TouchableOpacity style={[styles.toggleBtn, {backgroundColor: serviceOn ? '#00E676' : '#333'}]} onPress={() => toggleServiceControl(!serviceOn)}>
+                <Text style={{color: serviceOn ? '#000' : '#fff', fontWeight: 'bold'}}>{serviceOn ? 'ON' : 'OFF'}</Text>
+              </TouchableOpacity>
             </View>
 
             {!isSubActive && (
               <TouchableOpacity style={styles.planBanner} onPress={() => setShowPayment(true)}>
-                <View style={styles.planBadge}><Text style={{color: '#FFD700', fontWeight: 'bold'}}>PLAN</Text></View>
+                <View style={styles.planBadge}><Text style={{color: '#FFD700', fontWeight: 'bold', fontSize: 12}}>PLAN</Text></View>
                 <View style={{flex: 1, marginLeft: 15}}>
                   <Text style={{color: '#fff', fontSize: 18, fontWeight: 'bold'}}>Activate Plan</Text>
                   <Text style={{color: '#aaa', fontSize: 12}}>Choose a plan below and pay securely</Text>
@@ -391,20 +375,21 @@ export default function App() {
             <View style={styles.sectionCard}>
               <Text style={styles.sectionTitle}>Fare Range & Location</Text>
               <View style={{flexDirection: 'row', justifyContent: 'space-between'}}>
-                <TextInput style={[styles.input, {flex: 0.48}]} placeholder="Min Rs" placeholderTextColor="#888" keyboardType="numeric" value={minFare} onChangeText={setMinFare} />
-                <TextInput style={[styles.input, {flex: 0.48}]} placeholder="Max Rs (Opt)" placeholderTextColor="#888" keyboardType="numeric" value={maxFare} onChangeText={setMaxFare} />
+                <TextInput style={[styles.input, {flex: 0.48}]} placeholder="Min Rs" placeholderTextColor="#555" keyboardType="numeric" value={minFare} onChangeText={setMinFare} />
+                <TextInput style={[styles.input, {flex: 0.48}]} placeholder="Max Rs" placeholderTextColor="#555" keyboardType="numeric" value={maxFare} onChangeText={setMaxFare} />
               </View>
-              <TextInput style={[styles.input, {marginTop: 10}]} placeholder="Preferred Location (e.g. Kanpur)" placeholderTextColor="#888" value={preferredLocation} onChangeText={setPreferredLocation} />
+              <TextInput style={[styles.input, {marginTop: 5}]} placeholder="Preferred Location (e.g. Kanpur)" placeholderTextColor="#555" value={preferredLocation} onChangeText={setPreferredLocation} />
               <TouchableOpacity style={[styles.primaryBtn, {marginTop: 10}]} onPress={saveFilters}><Text style={styles.primaryBtnTxt}>SAVE FILTERS</Text></TouchableOpacity>
             </View>
 
+            {/* 🚀 RESTORED: Full Permissions Section in Dashboard */}
             <View style={styles.sectionCard}>
-              <Text style={styles.sectionTitle}>Permissions</Text>
+              <Text style={styles.sectionTitle}>Permissions Settings</Text>
               {[
-                { key: 'accessibility', icon: '🚹', title: 'Accessibility Service', desc: 'Tap to enable (Required for auto click)' },
-                { key: 'overlay', icon: '📱', title: 'Overlay Permission', desc: 'Required to display over other apps' },
-                { key: 'battery', icon: '🔋', title: 'Battery Optimization', desc: 'Tap to exempt from battery saving' },
-                { key: 'notifications', icon: '🔔', title: 'Notifications', desc: 'Tap to allow notifications' },
+                { key: 'accessibility', icon: '🚹', title: 'Accessibility Service', desc: 'Required for auto click' },
+                { key: 'overlay', icon: '📱', title: 'Overlay Permission', desc: 'Display over other apps' },
+                { key: 'battery', icon: '🔋', title: 'Battery Optimization', desc: 'Exempt from battery saving' },
+                { key: 'notifications', icon: '🔔', title: 'Notifications', desc: 'Allow background alerts' },
               ].map((p, index) => (
                 <View key={index} style={styles.permRow}>
                   <View style={styles.permIconBox}><Text>{p.icon}</Text></View>
@@ -421,77 +406,110 @@ export default function App() {
           </View>
         )}
 
+        {/* HISTORY TAB */}
         {activeTab === 'History' && (
           <View style={styles.tabContent}>
-            <Text style={styles.sectionTitle}>Today's Performance</Text>
-            <View style={styles.profitCard}>
-              <Text style={{color: '#fff', fontSize: 22, fontWeight: 'bold'}}>Ride history</Text>
-              <Text style={{color: '#aaa', fontSize: 12, marginBottom: 15}}>0 accepted | 0 rejected | 0 skipped</Text>
-              <View style={styles.rowBetween}>
-                <View style={{alignItems: 'center'}}><Text style={{color: '#00BFFF', fontSize: 24, fontWeight: 'bold'}}>0</Text><Text style={{color: '#aaa'}}>Detected</Text></View>
-                <View style={{alignItems: 'center'}}><Text style={{color: '#00E676', fontSize: 24, fontWeight: 'bold'}}>0</Text><Text style={{color: '#aaa'}}>Accepted</Text></View>
-                <View style={{alignItems: 'center'}}><Text style={{color: '#FFD700', fontSize: 24, fontWeight: 'bold'}}>0</Text><Text style={{color: '#aaa'}}>Value</Text></View>
-              </View>
-            </View>
+             <View style={styles.historyCard}>
+                <Text style={{color: '#00E676', fontSize: 12, fontWeight: 'bold'}}>TODAY'S PERFORMANCE</Text>
+                <Text style={{color: '#fff', fontSize: 26, fontWeight: 'bold', marginVertical: 5}}>Ride history</Text>
+                <Text style={{color: '#aaa', fontSize: 12, marginBottom: 20}}>0 accepted | 0 rejected | 0 skipped</Text>
+                
+                <View style={{flexDirection: 'row', justifyContent: 'space-between'}}>
+                  <View style={styles.historyStatBox}><Text style={{color: '#00BFFF', fontSize: 24, fontWeight: 'bold'}}>0</Text><Text style={{color: '#aaa', fontSize: 11}}>Detected</Text></View>
+                  <View style={styles.historyStatBox}><Text style={{color: '#00E676', fontSize: 24, fontWeight: 'bold'}}>0</Text><Text style={{color: '#aaa', fontSize: 11}}>Accepted</Text></View>
+                  <View style={styles.historyStatBox}><Text style={{color: '#FFD700', fontSize: 24, fontWeight: 'bold'}}>0</Text><Text style={{color: '#aaa', fontSize: 11}}>Value</Text></View>
+                </View>
+             </View>
 
-            <Text style={{color: '#aaa', textAlign: 'center', marginTop: 50}}>No detected rides yet.</Text>
+             <View style={{marginTop: 20}}>
+                <Text style={{color: '#00E676', fontSize: 18, fontWeight: 'bold', marginBottom: 10}}>Ride Timeline</Text>
+                <View style={styles.timelineBox}>
+                   <Text style={{color: '#fff', fontSize: 18, fontWeight: 'bold', marginBottom: 5}}>No failed rides</Text>
+                   <Text style={{color: '#aaa', fontSize: 12, textAlign: 'center', marginBottom: 20}}>New detections will appear here with fare, route, time, and decision status.</Text>
+                   <TouchableOpacity style={styles.cyanBtn} onPress={() => setActiveTab('Dashboard')}>
+                      <Text style={styles.cyanBtnTxt}>OPEN DASHBOARD</Text>
+                   </TouchableOpacity>
+                </View>
+             </View>
           </View>
         )}
 
+        {/* APPS TAB */}
         {activeTab === 'Apps' && (
           <View style={styles.tabContent}>
-            <View style={[styles.planBanner, {backgroundColor: '#1E2D24', borderColor: '#00E676', borderWidth: 1}]}>
-              <View style={[styles.planBadge, {backgroundColor: '#00E676'}]}><Text style={{color: '#000', fontWeight: 'bold'}}>ON</Text></View>
-              <View style={{flex: 1, marginLeft: 15}}>
-                <Text style={{color: '#fff', fontSize: 16, fontWeight: 'bold'}}>Detection ready</Text>
-                <Text style={{color: '#aaa', fontSize: 12}}>Supported apps listed below.</Text>
-              </View>
-            </View>
-            <View style={{marginTop: 15}}>
-              {appsStatus.map((app, index) => (
-                <View key={index} style={styles.appRow}>
-                  <View style={{flex: 1}}>
+            {appsStatus.map((app, index) => (
+              <View key={index} style={styles.appRow}>
+                <View style={{flexDirection: 'row', alignItems: 'center', flex: 1}}>
+                  <View style={styles.appIconGrid}><Text style={{color: '#555', fontSize: 20}}>⊞</Text></View>
+                  <View style={{marginLeft: 15}}>
                     <Text style={{color: '#fff', fontSize: 16, fontWeight: 'bold'}}>{app.name}</Text>
-                    <Text style={{color: '#aaa', fontSize: 12}}>{app.desc}</Text>
+                    <Text style={{color: '#777', fontSize: 12}}>
+                      {app.desc} | {app.installed ? 'Detection allowed' : 'Not installed'}
+                    </Text>
                   </View>
-                  <Switch 
-                    value={app.status} 
-                    onValueChange={(val) => toggleAppStatus(index, val)}
-                    trackColor={{ false: "#333", true: "#00E676" }} thumbColor={"#fff"}
-                  />
                 </View>
-              ))}
-            </View>
+
+                {!app.installed ? (
+                  <View style={styles.badgeMissing}>
+                    <Text style={{color: '#777', fontSize: 12, fontWeight: 'bold'}}>Missing</Text>
+                  </View>
+                ) : (
+                  <TouchableOpacity 
+                    style={[styles.badgeAllowed, !app.status && {backgroundColor: '#333', borderColor: '#555'}]}
+                    onPress={() => toggleAppStatus(index)}
+                  >
+                    <Text style={{color: app.status ? '#00E676' : '#aaa', fontSize: 12, fontWeight: 'bold'}}>
+                      {app.status ? 'Allowed' : 'Paused'}
+                    </Text>
+                  </TouchableOpacity>
+                )}
+              </View>
+            ))}
           </View>
         )}
 
+        {/* PROFILE TAB */}
         {activeTab === 'Profile' && (
           <View style={styles.tabContent}>
-            <View style={styles.sectionCard}>
-              <Text style={{color: '#fff', fontSize: 18, fontWeight: 'bold'}}>Phone Number</Text>
-              <Text style={{color: '#aaa', marginBottom: 15}}>{phone}</Text>
-              <Text style={{color: '#fff', fontSize: 18, fontWeight: 'bold'}}>Plan Status</Text>
-              <Text style={{color: isSubActive ? '#00E676' : '#FF4444', fontWeight: 'bold', marginBottom: 15}}>{isSubActive ? 'Active' : 'No active plan'}</Text>
-              
-              {!isSubActive && (
-                <TouchableOpacity style={styles.primaryBtn} onPress={() => setShowPayment(true)}>
-                  <Text style={styles.primaryBtnTxt}>RECHARGE NOW</Text>
-                </TouchableOpacity>
-              )}
-            </View>
             
-            <TouchableOpacity style={styles.secondaryBtn} onPress={handleLogout}>
-              <Text style={[styles.secondaryBtnTxt, {color: '#FF4444'}]}>SIGN OUT</Text>
-            </TouchableOpacity>
+            <View style={styles.profileUserCard}>
+              <View style={styles.profileAvatar}><Text style={{color:'#000', fontWeight:'bold', fontSize:24}}>R</Text></View>
+              <View style={{marginLeft: 15}}>
+                <Text style={{color: '#fff', fontSize: 20, fontWeight: 'bold'}}>Rider ID: {phone}</Text>
+                <Text style={{color: '#aaa', fontSize: 12}}>India • Secure / INR</Text>
+                <View style={styles.roleBadge}><Text style={{color: '#FFD700', fontSize: 10, fontWeight: 'bold'}}>Driver</Text></View>
+              </View>
+            </View>
+
+            <View style={styles.profilePlanCard}>
+              <View style={styles.planRing}>
+                <Text style={{color: isSubActive ? '#00E676' : '#FF4444', fontWeight: 'bold', fontSize: 12}}>
+                   {isSubActive ? '100%' : '0%'}
+                </Text>
+              </View>
+              <View style={{marginLeft: 20}}>
+                <Text style={{color: '#fff', fontSize: 18, fontWeight: 'bold'}}>Plan Status</Text>
+                <Text style={{color: isSubActive ? '#00E676' : '#FF4444', fontSize: 14, marginTop: 5}}>{isSubActive ? 'Active' : 'No active plan'}</Text>
+              </View>
+            </View>
+
+            <View style={styles.sectionCard}>
+               <Text style={styles.sectionTitle}>Account Actions</Text>
+               <TouchableOpacity style={[styles.secondaryBtn, {borderColor: '#FF4444'}]} onPress={handleLogout}>
+                 <Text style={[styles.secondaryBtnTxt, {color: '#FF4444'}]}>SIGN OUT</Text>
+               </TouchableOpacity>
+            </View>
+
           </View>
         )}
       </ScrollView>
 
+      {/* BOTTOM NAVIGATION */}
       <View style={styles.bottomNav}>
-        {['Dashboard', 'History', 'Apps', 'Profile'].map((tab) => (
+        {['Dashboard', 'History', 'Apps'].map((tab) => (
           <TouchableOpacity key={tab} style={styles.navItem} onPress={() => setActiveTab(tab)}>
-            <Text style={{fontSize: 20, marginBottom: 2}}>{tab === 'Dashboard' ? '🎛️' : tab === 'History' ? '🕒' : tab === 'Apps' ? '📱' : '👤'}</Text>
-            <Text style={{color: activeTab === tab ? '#00E676' : '#888', fontSize: 10, fontWeight: 'bold'}}>{tab}</Text>
+            <Text style={{fontSize: 20, marginBottom: 2, color: activeTab === tab ? '#00E676' : '#555'}}>{tab === 'Dashboard' ? '🎛️' : tab === 'History' ? '🕒' : '📱'}</Text>
+            <Text style={{color: activeTab === tab ? '#fff' : '#555', fontSize: 10, fontWeight: 'bold'}}>{tab}</Text>
           </TouchableOpacity>
         ))}
       </View>
@@ -502,36 +520,63 @@ export default function App() {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#0B1319' },
   authHeader: { padding: 40, alignItems: 'center', marginTop: 20 },
-  logoImage: { width: 80, height: 80, marginBottom: 15 }, // 🖼️ लोगो का स्टाइल
-  authLogoTxt: { color: '#FFD700', fontSize: 28, fontWeight: 'bold' },
+  logoImage: { width: 80, height: 80, marginBottom: 15 }, 
+  authLogoTxt: { color: '#fff', fontSize: 28, fontWeight: 'bold' },
   authSubTxt: { color: '#aaa', fontSize: 14 },
   authCard: { flex: 1, backgroundColor: '#111B21', borderTopLeftRadius: 30, borderTopRightRadius: 30, padding: 25 },
   heading: { color: '#fff', fontSize: 20, fontWeight: 'bold', marginBottom: 20 },
   input: { backgroundColor: '#1E2A32', color: '#fff', borderRadius: 10, padding: 15, fontSize: 16, marginBottom: 15, borderWidth: 1, borderColor: '#2A3942' },
   primaryBtn: { backgroundColor: '#FFD700', padding: 15, borderRadius: 10, alignItems: 'center' },
   primaryBtnTxt: { color: '#000', fontWeight: 'bold', fontSize: 16 },
-  secondaryBtn: { backgroundColor: '#1E2A32', padding: 15, borderRadius: 10, alignItems: 'center', borderWidth: 1, borderColor: '#2A3942' },
+  cyanBtn: { backgroundColor: '#00E676', padding: 15, borderRadius: 10, alignItems: 'center' },
+  cyanBtnTxt: { color: '#000', fontWeight: 'bold', fontSize: 14 },
+  secondaryBtn: { backgroundColor: '#111B21', padding: 15, borderRadius: 10, alignItems: 'center', borderWidth: 1, borderColor: '#2A3942' },
   secondaryBtnTxt: { color: '#fff', fontWeight: 'bold', fontSize: 16 },
-  mainHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 20, backgroundColor: '#111B21', borderBottomWidth: 1, borderBottomColor: '#1E2A32' },
-  profileIcon: { backgroundColor: '#FFD700', width: 40, height: 40, borderRadius: 20, justifyContent: 'center', alignItems: 'center' },
+  
+  mainHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 15, backgroundColor: '#0B1319' },
+  profileIcon: { backgroundColor: '#1E2A32', paddingHorizontal: 15, paddingVertical: 8, borderRadius: 20, borderWidth: 1, borderColor: '#2A3942' },
   tabContent: { padding: 15 },
-  profitCard: { backgroundColor: '#111B21', padding: 20, borderRadius: 15, marginBottom: 15, borderWidth: 1, borderColor: '#1E2A32' },
-  planBanner: { flexDirection: 'row', backgroundColor: '#1E2A32', padding: 15, borderRadius: 15, alignItems: 'center', marginBottom: 15 },
-  planBadge: { width: 50, height: 50, borderRadius: 25, backgroundColor: '#332700', justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: '#FFD700' },
-  sectionCard: { backgroundColor: '#111B21', padding: 15, borderRadius: 15, marginBottom: 15, borderWidth: 1, borderColor: '#1E2A32' },
+  
+  profitCard: { backgroundColor: '#111B21', padding: 20, borderRadius: 15, marginBottom: 15, borderWidth: 1 },
+  pillBox: { backgroundColor: '#1E2A32', padding: 10, borderRadius: 10, flex: 1 },
+  pillTextTop: { color: '#FFD700', fontSize: 9, fontWeight: 'bold' },
+  pillTextBottom: { color: '#fff', fontSize: 14, fontWeight: 'bold', marginTop: 2 },
+  toggleBtn: { position: 'absolute', top: 15, right: 15, paddingHorizontal: 15, paddingVertical: 8, borderRadius: 20 },
+  
+  planBanner: { flexDirection: 'row', backgroundColor: '#1E1A0F', padding: 15, borderRadius: 15, alignItems: 'center', marginBottom: 15, borderWidth: 1, borderColor: '#FFD700' },
+  planBadge: { width: 40, height: 40, borderRadius: 20, backgroundColor: '#332700', justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: '#FFD700' },
+  
+  sectionCard: { backgroundColor: '#111B21', padding: 15, borderRadius: 15, marginBottom: 15 },
   sectionTitle: { color: '#fff', fontSize: 16, fontWeight: 'bold', marginBottom: 15 },
   rowBetween: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   statusDot: { width: 50, height: 50, borderRadius: 25, justifyContent: 'center', alignItems: 'center' },
+  
   permRow: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#1E2A32', padding: 12, borderRadius: 10, marginBottom: 10 },
   permIconBox: { width: 40, height: 40, borderRadius: 8, backgroundColor: '#2A3942', justifyContent: 'center', alignItems: 'center' },
   fixBtn: { backgroundColor: 'rgba(255, 68, 68, 0.2)', paddingVertical: 8, paddingHorizontal: 15, borderRadius: 20, borderWidth: 1, borderColor: '#FF4444' },
   fixBtnOk: { backgroundColor: 'rgba(0, 230, 118, 0.2)', borderColor: '#00E676' },
   fixBtnTxt: { color: '#fff', fontWeight: 'bold', fontSize: 12 },
-  appRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 15, borderBottomWidth: 1, borderBottomColor: '#1E2A32' },
+
+  historyCard: { backgroundColor: '#111B21', padding: 20, borderRadius: 15, borderWidth: 1, borderColor: '#1E2A32' },
+  historyStatBox: { backgroundColor: '#1E2A32', padding: 15, borderRadius: 10, width: '30%', alignItems: 'center', borderWidth: 1, borderColor: '#2A3942' },
+  timelineBox: { backgroundColor: '#111B21', padding: 30, borderRadius: 15, alignItems: 'center' },
+  
+  appRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 15 },
+  appIconGrid: { width: 40, height: 40, borderRadius: 10, backgroundColor: '#1E2A32', justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: '#2A3942' },
+  badgeMissing: { paddingHorizontal: 15, paddingVertical: 6, borderRadius: 15, backgroundColor: '#1E2A32', borderWidth: 1, borderColor: '#2A3942' },
+  badgeAllowed: { paddingHorizontal: 15, paddingVertical: 6, borderRadius: 15, backgroundColor: 'rgba(0, 230, 118, 0.1)', borderWidth: 1, borderColor: '#00E676' },
+  
+  profileUserCard: { flexDirection: 'row', backgroundColor: '#111B21', padding: 20, borderRadius: 15, marginBottom: 15, alignItems: 'center' },
+  profileAvatar: { width: 60, height: 60, borderRadius: 15, backgroundColor: '#FFD700', justifyContent: 'center', alignItems: 'center' },
+  roleBadge: { backgroundColor: '#332700', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 10, alignSelf: 'flex-start', marginTop: 5, borderWidth: 1, borderColor: '#FFD700' },
+  profilePlanCard: { flexDirection: 'row', backgroundColor: '#111B21', padding: 20, borderRadius: 15, marginBottom: 15, alignItems: 'center' },
+  planRing: { width: 60, height: 60, borderRadius: 30, borderWidth: 4, borderColor: '#1E2A32', borderTopColor: '#00E676', justifyContent: 'center', alignItems: 'center' },
+  
   planContainer: { marginBottom: 20 },
-  planRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#1E2A32', padding: 15, borderRadius: 10, marginBottom: 10, borderWidth: 1, borderColor: 'transparent' },
-  planRowActive: { borderColor: '#FFD700', backgroundColor: '#332700' },
+  planRow: { backgroundColor: '#1E2A32', padding: 20, borderRadius: 10, marginBottom: 10 },
+  planRowActive: { backgroundColor: '#FFD700' },
   qrBox: { backgroundColor: '#1E2A32', padding: 20, borderRadius: 15, alignItems: 'center', marginBottom: 20, borderWidth: 1, borderColor: '#2A3942' },
-  bottomNav: { position: 'absolute', bottom: 0, width: '100%', flexDirection: 'row', backgroundColor: '#111B21', borderTopWidth: 1, borderTopColor: '#1E2A32', paddingBottom: Platform.OS === 'ios' ? 20 : 0 },
-  navItem: { flex: 1, alignItems: 'center', paddingVertical: 12 }
+  
+  bottomNav: { position: 'absolute', bottom: 0, width: '100%', flexDirection: 'row', backgroundColor: '#0B1319', borderTopWidth: 1, borderTopColor: '#1E2A32', paddingBottom: Platform.OS === 'ios' ? 20 : 0 },
+  navItem: { flex: 1, alignItems: 'center', paddingVertical: 10 }
 });
