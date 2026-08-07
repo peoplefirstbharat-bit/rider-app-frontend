@@ -4,7 +4,6 @@ const path = require('path');
 
 module.exports = function withAndroidAutomator(config) {
   
-  // 1. AndroidManifest.xml में परमिशन और <queries> जोड़ना
   config = withAndroidManifest(config, (config) => {
     const manifest = config.modResults;
     
@@ -15,7 +14,7 @@ module.exports = function withAndroidAutomator(config) {
     }
 
     const packagesToQuery = [
-        "com.olacabs.partner", "com.ubercab.driver", "com.rapido.passenger.to",
+        "com.olacabs.partner", "com.ubercab.driver", "com.rapido.rider",
         "in.juspay.nammayatripartner", "sinet.startup.inDriver", "com.blusmart.driver"
     ];
 
@@ -41,11 +40,9 @@ module.exports = function withAndroidAutomator(config) {
         'meta-data': [{ '$': { 'android:name': 'android.accessibilityservice', 'android:resource': '@xml/accessibility_service_config' } }]
       });
     }
-
     return config;
   });
 
-  // 2. बैकग्राउंड में नेटिव जावा इंजन जनरेट करना
   config = withDangerousMod(config, [
     'android',
     (config) => {
@@ -77,6 +74,7 @@ import android.content.pm.PackageManager;
 import android.content.Intent;
 import android.net.Uri;
 import android.provider.Settings;
+import android.util.Log;
 
 public class FilterBridgeModule extends ReactContextBaseJavaModule {
     public static int savedMinFare = 0;
@@ -101,6 +99,12 @@ public class FilterBridgeModule extends ReactContextBaseJavaModule {
     @ReactMethod
     public void setServiceStatus(boolean status) {
         isServiceRunning = status;
+    }
+
+    // 🚀 FIX 3: यह मेथड मिसिंग था जिसकी वजह से ऐप क्रैश हो रहा था!
+    @ReactMethod
+    public void updateAppStatus(String appId, boolean status) {
+        Log.d("FilterBridge", "App status updated: " + appId + " -> " + status);
     }
 
     @ReactMethod
@@ -266,22 +270,16 @@ public class AutoClickService extends AccessibilityService {
     }
   ]);
 
-  // 🚀 ब्रह्मास्त्र फिक्स (100% Foolproof Linking) 
   config = withMainApplication(config, (config) => {
     let content = config.modResults.contents;
-    
-    // Kotlin के लिए (Expo 50+)
     if (config.modResults.language === 'kt') {
       if (!content.includes('com.rider.acceptpro.FilterBridgePackage')) {
-        // हम कमेंट्स को इग्नोर करके सीधा कोर लॉजिक को बदल रहे हैं!
         content = content.replace(
           /return PackageList\(this\)\.packages/g,
           'val customPackagesList = PackageList(this).packages\n          customPackagesList.add(com.rider.acceptpro.FilterBridgePackage())\n          return customPackagesList'
         );
       }
-    } 
-    // Java के लिए
-    else if (config.modResults.language === 'java') {
+    } else if (config.modResults.language === 'java') {
       if (!content.includes('com.rider.acceptpro.FilterBridgePackage')) {
         if (content.includes('List<ReactPackage> packages = new PackageList(this).getPackages();')) {
             content = content.replace(
@@ -296,7 +294,6 @@ public class AutoClickService extends AccessibilityService {
         }
       }
     }
-    
     config.modResults.contents = content;
     return config;
   });
