@@ -1,36 +1,37 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, TextInput, TouchableOpacity, StyleSheet, StatusBar, Alert, ActivityIndicator, ScrollView, Switch, Image, Linking, Platform, FlatList } from 'react-native';
+import { View, Text, TextInput, TouchableOpacity, StyleSheet, StatusBar, Alert, ActivityIndicator, ScrollView, Switch, Image, Linking, Platform, NativeModules } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 // ⚠️ अपना असली Render Backend URL यहाँ डालें
 const BACKEND_URL = "https://your-backend-name.onrender.com"; 
 
+// जावा इंजन से जुड़ने वाला ब्रिज
+const { FilterBridge } = NativeModules;
+
 export default function App() {
-  // === 1. STATE MANAGEMENT ===
+  const [isAppLoading, setIsAppLoading] = useState(true);
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [isLoginMode, setIsLoginMode] = useState(true);
-  const [activeTab, setActiveTab] = useState('Dashboard'); // Dashboard, History, Apps, Profile
+  const [activeTab, setActiveTab] = useState('Dashboard'); 
   const [showPayment, setShowPayment] = useState(false);
 
-  // User & Settings State
   const [phone, setPhone] = useState('');
   const [pin, setPin] = useState('');
   const [loading, setLoading] = useState(false);
   const [isSubActive, setIsSubActive] = useState(false);
+  
   const [minFare, setMinFare] = useState('');
-  const [maxFare, setMaxFare] = useState(''); // UI purpose like video
+  const [maxFare, setMaxFare] = useState(''); 
   const [preferredLocation, setPreferredLocation] = useState('');
   const [serviceOn, setServiceOn] = useState(false);
 
-  // Payment State
   const [paymentInfo, setPaymentInfo] = useState({ upiId: 'लोड हो रहा है...', upiNumber: '...', qrUrl: '' });
   const [utr, setUtr] = useState('');
   const [selectedPlanDays, setSelectedPlanDays] = useState(7);
   const [planAmount, setPlanAmount] = useState(39);
 
-  // Permissions State (Like Video)
   const [perms, setPerms] = useState({ accessibility: false, overlay: false, battery: false, notifications: false });
 
-  // Supported Apps State
   const [appsStatus, setAppsStatus] = useState([
     { id: 'ola', name: 'Ola', desc: 'Cab / Auto', status: true },
     { id: 'uber', name: 'Uber', desc: 'Cab / Moto', status: true },
@@ -39,7 +40,29 @@ export default function App() {
     { id: 'namma', name: 'Namma Yatri', desc: 'Auto / Taxi', status: false },
   ]);
 
-  // === 2. API CALLS ===
+  // 🚀 ऐप खुलते ही चेक करना कि यूजर पहले से लॉगिन है या नहीं (Auto-Login)
+  useEffect(() => {
+    checkLoginStatus();
+  }, []);
+
+  const checkLoginStatus = async () => {
+    try {
+      const savedPhone = await AsyncStorage.getItem('user_phone');
+      const savedSub = await AsyncStorage.getItem('is_sub_active');
+      const savedMinFare = await AsyncStorage.getItem('min_fare');
+      const savedLoc = await AsyncStorage.getItem('pref_loc');
+
+      if (savedPhone) {
+        setPhone(savedPhone);
+        setIsSubActive(savedSub === 'true');
+        if (savedMinFare) setMinFare(savedMinFare);
+        if (savedLoc) setPreferredLocation(savedLoc);
+        setIsLoggedIn(true);
+      }
+    } catch (e) { console.log('Error reading storage'); }
+    setIsAppLoading(false);
+  };
+
   useEffect(() => {
     if (showPayment) {
       fetch(`${BACKEND_URL}/api/payment-info`)
@@ -58,14 +81,26 @@ export default function App() {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ phone, pin })
       });
       const data = await response.json();
+      
       if (data.success) {
-        if (!isLoginMode) { Alert.alert('सफल', 'अकाउंट बन गया!'); setIsLoginMode(true); } 
-        else {
+        if (!isLoginMode) { 
+          Alert.alert('सफल', 'अकाउंट बन गया!'); 
+          setIsLoginMode(true); 
+        } else {
           setIsSubActive(data.active);
-          if (data.data) {
-            setMinFare(data.data.minFare ? data.data.minFare.toString() : '');
-            setPreferredLocation(data.data.preferredLocation || '');
-          }
+          
+          let mFare = data.data?.minFare ? data.data.minFare.toString() : '';
+          let pLoc = data.data?.preferredLocation || '';
+          
+          setMinFare(mFare);
+          setPreferredLocation(pLoc);
+          
+          // लॉगिन डेटा लोकल स्टोरेज में सेव करना
+          await AsyncStorage.setItem('user_phone', phone);
+          await AsyncStorage.setItem('is_sub_active', String(data.active));
+          await AsyncStorage.setItem('min_fare', mFare);
+          await AsyncStorage.setItem('pref_loc', pLoc);
+
           setIsLoggedIn(true);
         }
       } else Alert.alert('एरर', data.message);
@@ -73,6 +108,15 @@ export default function App() {
     setLoading(false);
   };
 
+  const handleLogout = async () => {
+    await AsyncStorage.clear();
+    setIsLoggedIn(false);
+    setPhone('');
+    setPin('');
+    if (FilterBridge) FilterBridge.setServiceStatus(false);
+  };
+
+  // 🔥 सेटिंग्स को सर्वर और 'जावा इंजन' दोनों में सेव करना
   const saveFilters = async () => {
     try {
       const response = await fetch(`${BACKEND_URL}/api/settings`, {
@@ -80,7 +124,17 @@ export default function App() {
         body: JSON.stringify({ phone, minFare: Number(minFare), preferredLocation })
       });
       const data = await response.json();
-      if (data.success) Alert.alert('सफलता', 'फिल्टर्स सेव हो गए!');
+      
+      if (data.success) {
+        await AsyncStorage.setItem('min_fare', minFare);
+        await AsyncStorage.setItem('pref_loc', preferredLocation);
+
+        // जावा इंजन (Native Android) को सेटिंग्स भेजना
+        if (FilterBridge) {
+          FilterBridge.saveFilters(Number(minFare) || 0, preferredLocation || "");
+        }
+        Alert.alert('सफलता', 'फिल्टर्स सेव हो गए और इंजन में सेट हो गए!');
+      }
     } catch (error) { Alert.alert('एरर', 'सेव नहीं हुआ!'); }
   };
 
@@ -93,13 +147,12 @@ export default function App() {
         body: JSON.stringify({ phone, utr, planDays: selectedPlanDays, amount: planAmount })
       });
       const data = await response.json();
-      if (data.success) { Alert.alert('सफलता!', 'पेमेंट रिक्वेस्ट एडमिन (Telegram) को भेज दी गई है!'); setShowPayment(false); } 
+      if (data.success) { Alert.alert('सफलता!', 'पेमेंट रिक्वेस्ट भेज दी गई है!'); setShowPayment(false); } 
       else Alert.alert('एरर', data.message);
     } catch (error) { Alert.alert('एरर', 'रिक्वेस्ट फेल!'); }
     setLoading(false);
   };
 
-  // === 3. PERMISSIONS LOGIC ===
   const requestPerm = (type) => {
     if (Platform.OS !== 'android') return;
     try {
@@ -113,10 +166,31 @@ export default function App() {
   const toggleServiceControl = (val) => {
     if (!isSubActive) return Alert.alert('प्रतिबंध', 'प्लान एक्टिव नहीं है!');
     if (val && (!perms.accessibility || !perms.overlay)) return Alert.alert('एरर', 'नीचे से Permissions चालू करें!');
+    
     setServiceOn(val);
+    if (FilterBridge) FilterBridge.setServiceStatus(val);
   };
 
-  // ================= 4. AUTH SCREEN (Pre-Login) =================
+  // ऐप्स का स्टेटस जावा इंजन को भेजना
+  const toggleAppStatus = (index, val) => {
+    const newApps = [...appsStatus];
+    newApps[index].status = val;
+    setAppsStatus(newApps);
+    
+    if (FilterBridge) {
+      FilterBridge.updateAppStatus(newApps[index].id, val);
+    }
+  };
+
+  if (isAppLoading) {
+    return (
+      <View style={[styles.container, {justifyContent: 'center', alignItems: 'center'}]}>
+        <StatusBar barStyle="light-content" backgroundColor="#0B1319" />
+        <ActivityIndicator size="large" color="#FFD700" />
+      </View>
+    );
+  }
+
   if (!isLoggedIn) {
     return (
       <View style={styles.container}>
@@ -137,7 +211,6 @@ export default function App() {
     );
   }
 
-  // ================= 5. PAYMENT SCREEN (Modal View) =================
   if (showPayment) {
     return (
       <View style={styles.container}>
@@ -173,25 +246,17 @@ export default function App() {
     );
   }
 
-  // ================= 6. MAIN APP SCREEN (WITH TABS) =================
   return (
     <View style={styles.container}>
       <StatusBar barStyle="light-content" backgroundColor="#0B1319" />
-      
-      {/* HEADER */}
       <View style={styles.mainHeader}>
         <View><Text style={styles.authLogoTxt}>Rider Accept</Text><Text style={styles.authSubTxt}>Premium driver console</Text></View>
         <TouchableOpacity style={styles.profileIcon}><Text style={{color:'#000', fontWeight:'bold'}}>PRO</Text></TouchableOpacity>
       </View>
 
-      {/* MAIN CONTENT AREA */}
       <ScrollView style={{flex: 1}} contentContainerStyle={{paddingBottom: 80}}>
-        
-        {/* --- TAB 1: DASHBOARD --- */}
         {activeTab === 'Dashboard' && (
           <View style={styles.tabContent}>
-            
-            {/* Profit Card */}
             <View style={styles.profitCard}>
               <Text style={{color: '#00E676', fontSize: 12, fontWeight: 'bold'}}>LIVE DRIVER CONSOLE</Text>
               <Text style={{color: '#fff', fontSize: 28, fontWeight: 'bold', marginVertical: 5}}>Profit Rs 0</Text>
@@ -201,7 +266,6 @@ export default function App() {
               </View>
             </View>
 
-            {/* Activate Plan Banner */}
             {!isSubActive && (
               <TouchableOpacity style={styles.planBanner} onPress={() => setShowPayment(true)}>
                 <View style={styles.planBadge}><Text style={{color: '#FFD700', fontWeight: 'bold'}}>PLAN</Text></View>
@@ -212,7 +276,6 @@ export default function App() {
               </TouchableOpacity>
             )}
 
-            {/* Service Control */}
             <View style={styles.sectionCard}>
               <Text style={styles.sectionTitle}>Service Control</Text>
               <View style={styles.rowBetween}>
@@ -227,7 +290,6 @@ export default function App() {
               </View>
             </View>
 
-            {/* Fare Range & Location */}
             <View style={styles.sectionCard}>
               <Text style={styles.sectionTitle}>Fare Range & Location</Text>
               <View style={{flexDirection: 'row', justifyContent: 'space-between'}}>
@@ -238,7 +300,6 @@ export default function App() {
               <TouchableOpacity style={[styles.primaryBtn, {marginTop: 10}]} onPress={saveFilters}><Text style={styles.primaryBtnTxt}>SAVE FILTERS</Text></TouchableOpacity>
             </View>
 
-            {/* PERMISSIONS SECTION (JUST LIKE VIDEO) */}
             <View style={styles.sectionCard}>
               <Text style={styles.sectionTitle}>Permissions</Text>
               {[
@@ -262,7 +323,6 @@ export default function App() {
           </View>
         )}
 
-        {/* --- TAB 2: HISTORY --- */}
         {activeTab === 'History' && (
           <View style={styles.tabContent}>
             <Text style={styles.sectionTitle}>Today's Performance</Text>
@@ -279,7 +339,6 @@ export default function App() {
           </View>
         )}
 
-        {/* --- TAB 3: APPS --- */}
         {activeTab === 'Apps' && (
           <View style={styles.tabContent}>
             <View style={[styles.planBanner, {backgroundColor: '#1E2D24', borderColor: '#00E676', borderWidth: 1}]}>
@@ -298,7 +357,7 @@ export default function App() {
                   </View>
                   <Switch 
                     value={app.status} 
-                    onValueChange={(val) => { const newApps = [...appsStatus]; newApps[index].status = val; setAppsStatus(newApps); }}
+                    onValueChange={(val) => toggleAppStatus(index, val)}
                     trackColor={{ false: "#333", true: "#00E676" }} thumbColor={"#fff"}
                   />
                 </View>
@@ -307,7 +366,6 @@ export default function App() {
           </View>
         )}
 
-        {/* --- TAB 4: PROFILE --- */}
         {activeTab === 'Profile' && (
           <View style={styles.tabContent}>
             <View style={styles.sectionCard}>
@@ -316,15 +374,13 @@ export default function App() {
               <Text style={{color: '#fff', fontSize: 18, fontWeight: 'bold'}}>Plan Status</Text>
               <Text style={{color: isSubActive ? '#00E676' : '#FF4444', fontWeight: 'bold'}}>{isSubActive ? 'Active' : 'No active plan'}</Text>
             </View>
-            <TouchableOpacity style={styles.secondaryBtn} onPress={() => setIsLoggedIn(false)}>
+            <TouchableOpacity style={styles.secondaryBtn} onPress={handleLogout}>
               <Text style={[styles.secondaryBtnTxt, {color: '#FF4444'}]}>SIGN OUT</Text>
             </TouchableOpacity>
           </View>
         )}
-
       </ScrollView>
 
-      {/* BOTTOM NAVIGATION BAR */}
       <View style={styles.bottomNav}>
         {['Dashboard', 'History', 'Apps', 'Profile'].map((tab) => (
           <TouchableOpacity key={tab} style={styles.navItem} onPress={() => setActiveTab(tab)}>
@@ -337,7 +393,6 @@ export default function App() {
   );
 }
 
-// === STYLES ===
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#0B1319' },
   authHeader: { padding: 40, alignItems: 'center', marginTop: 20 },
@@ -350,33 +405,26 @@ const styles = StyleSheet.create({
   primaryBtnTxt: { color: '#000', fontWeight: 'bold', fontSize: 16 },
   secondaryBtn: { backgroundColor: '#1E2A32', padding: 15, borderRadius: 10, alignItems: 'center', borderWidth: 1, borderColor: '#2A3942' },
   secondaryBtnTxt: { color: '#fff', fontWeight: 'bold', fontSize: 16 },
-  
   mainHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 20, backgroundColor: '#111B21', borderBottomWidth: 1, borderBottomColor: '#1E2A32' },
   profileIcon: { backgroundColor: '#FFD700', width: 40, height: 40, borderRadius: 20, justifyContent: 'center', alignItems: 'center' },
-  
   tabContent: { padding: 15 },
   profitCard: { backgroundColor: '#111B21', padding: 20, borderRadius: 15, marginBottom: 15, borderWidth: 1, borderColor: '#1E2A32' },
   planBanner: { flexDirection: 'row', backgroundColor: '#1E2A32', padding: 15, borderRadius: 15, alignItems: 'center', marginBottom: 15 },
   planBadge: { width: 50, height: 50, borderRadius: 25, backgroundColor: '#332700', justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: '#FFD700' },
-  
   sectionCard: { backgroundColor: '#111B21', padding: 15, borderRadius: 15, marginBottom: 15, borderWidth: 1, borderColor: '#1E2A32' },
   sectionTitle: { color: '#fff', fontSize: 16, fontWeight: 'bold', marginBottom: 15 },
   rowBetween: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   statusDot: { width: 50, height: 50, borderRadius: 25, justifyContent: 'center', alignItems: 'center' },
-  
   permRow: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#1E2A32', padding: 12, borderRadius: 10, marginBottom: 10 },
   permIconBox: { width: 40, height: 40, borderRadius: 8, backgroundColor: '#2A3942', justifyContent: 'center', alignItems: 'center' },
   fixBtn: { backgroundColor: 'rgba(255, 68, 68, 0.2)', paddingVertical: 8, paddingHorizontal: 15, borderRadius: 20, borderWidth: 1, borderColor: '#FF4444' },
   fixBtnOk: { backgroundColor: 'rgba(0, 230, 118, 0.2)', borderColor: '#00E676' },
   fixBtnTxt: { color: '#fff', fontWeight: 'bold', fontSize: 12 },
-
   appRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 15, borderBottomWidth: 1, borderBottomColor: '#1E2A32' },
-
   planContainer: { marginBottom: 20 },
   planRow: { flexDirection: 'row', justifyContent: 'space-between', backgroundColor: '#1E2A32', padding: 15, borderRadius: 10, marginBottom: 10, borderWidth: 1, borderColor: 'transparent' },
   planRowActive: { borderColor: '#FFD700', backgroundColor: '#332700' },
   qrBox: { backgroundColor: '#1E2A32', padding: 20, borderRadius: 15, alignItems: 'center', marginBottom: 20, borderWidth: 1, borderColor: '#2A3942' },
-
   bottomNav: { position: 'absolute', bottom: 0, width: '100%', flexDirection: 'row', backgroundColor: '#111B21', borderTopWidth: 1, borderTopColor: '#1E2A32', paddingBottom: Platform.OS === 'ios' ? 20 : 0 },
   navItem: { flex: 1, alignItems: 'center', paddingVertical: 12 }
 });
