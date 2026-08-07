@@ -3,7 +3,6 @@ import { View, Text, TextInput, TouchableOpacity, StyleSheet, StatusBar, Alert, 
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import DeviceInfo from 'react-native-device-info';
 
-// ⚠️ तुम्हारा लाइव सर्वर URL
 const BACKEND_URL = "https://ride-auto-backend.onrender.com";
 const { FilterBridge } = NativeModules;
 
@@ -24,12 +23,10 @@ export default function App() {
   const [preferredLocation, setPreferredLocation] = useState('');
   const [serviceOn, setServiceOn] = useState(false);
 
-  // 🚀 LIVE HISTORY STATS
   const [historyStats, setHistoryStats] = useState({ detected: 0, accepted: 0, value: 0 });
   const [recentRides, setRecentRides] = useState([]);
 
-  // PAYMENT & PLANS
-  const [paymentInfo, setPaymentInfo] = useState({ upiId: 'jdtrading845-1@oksbi' }); // Default UPI
+  const [paymentInfo, setPaymentInfo] = useState({ upiId: 'jdtrading845-1@oksbi' }); 
   const [plansList, setPlansList] = useState([]); 
   const [utr, setUtr] = useState('');
   const [selectedPlanDays, setSelectedPlanDays] = useState(1);
@@ -37,17 +34,16 @@ export default function App() {
 
   const [perms, setPerms] = useState({ accessibility: false, overlay: false, battery: false, notifications: false });
 
-  // 🚀 APPS STATUS FOR DETECTION
+  // 🚀 FIXED: असली और सही पैकेज नेम्स (Real Driver App Package Names)
   const [appsStatus, setAppsStatus] = useState([
-    { id: 'ola', name: 'Ola', desc: 'Cab / Auto', pkg: 'com.olacabs.driver', installed: false, status: false },
+    { id: 'ola', name: 'Ola', desc: 'Cab / Auto', pkg: 'com.olacabs.partner', installed: false, status: false },
     { id: 'uber', name: 'Uber', desc: 'Cab / Moto', pkg: 'com.ubercab.driver', installed: false, status: false },
-    { id: 'rapido', name: 'Rapido', desc: 'Bike taxi', pkg: 'com.rapido.rider', installed: false, status: false },
+    { id: 'rapido', name: 'Rapido', desc: 'Bike taxi', pkg: 'com.rapido.passenger.to', installed: false, status: false },
     { id: 'namma', name: 'Namma Yatri', desc: 'Auto / Taxi', pkg: 'in.juspay.nammayatripartner', installed: false, status: false },
     { id: 'indrive', name: 'inDrive', desc: 'Ride sharing', pkg: 'sinet.startup.inDriver', installed: false, status: false },
     { id: 'blusmart', name: 'BluSmart', desc: 'EV cab', pkg: 'com.blusmart.driver', installed: false, status: false },
   ]);
 
-  // 🚀 1. LISTENING TO JAVA ENGINE (LIVE HISTORY)
   useEffect(() => {
     const rideListener = DeviceEventEmitter.addListener('RideAccepted', (event) => {
       const fare = event.fare || 0;
@@ -78,7 +74,6 @@ export default function App() {
     return () => subscription.remove();
   }, [isLoggedIn, phone]);
 
-  // 🚀 2. NATIVE APP DETECTION (Missing/Allowed Fix)
   const checkInstalledApps = async () => {
     if (!FilterBridge || !FilterBridge.checkAppInstalled) return;
     
@@ -139,7 +134,6 @@ export default function App() {
           setSelectedPlanDays(data.data[0].days);
           setPlanAmount(data.data[0].price);
         } else {
-          // Fallback Plans for Demo
           setPlansList([
             { name: 'Daily Pass', days: 1, price: 10, description: '1 दिन के लिए सभी फीचर्स अनलॉक' },
             { name: 'Weekly Pass', days: 7, price: 50, description: '7 दिनों के लिए गॉड-मोड' },
@@ -295,7 +289,6 @@ export default function App() {
     );
   }
 
-  // 🚀 3. AUTO QR GENERATOR LOGIC
   const upiString = `upi://pay?pa=${paymentInfo.upiId}&pn=RiderAccept&am=${planAmount}&cu=INR`;
   const autoQrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=${encodeURIComponent(upiString)}&margin=10`;
 
@@ -354,7 +347,6 @@ export default function App() {
 
       <ScrollView style={{flex: 1}} contentContainerStyle={{paddingBottom: 80}}>
         
-        {/* DASHBOARD */}
         {activeTab === 'Dashboard' && (
           <View style={styles.tabContent}>
             
@@ -431,7 +423,6 @@ export default function App() {
           </View>
         )}
 
-        {/* 🚀 LIVE HISTORY TAB */}
         {activeTab === 'History' && (
           <View style={styles.tabContent}>
              <View style={styles.historyCard}>
@@ -472,7 +463,6 @@ export default function App() {
           </View>
         )}
 
-        {/* APPS TAB */}
         {activeTab === 'Apps' && (
           <View style={styles.tabContent}>
             {appsStatus.map((app, index) => (
@@ -506,7 +496,6 @@ export default function App() {
           </View>
         )}
 
-        {/* PROFILE TAB */}
         {activeTab === 'Profile' && (
           <View style={styles.tabContent}>
             
@@ -542,7 +531,6 @@ export default function App() {
         )}
       </ScrollView>
 
-      {/* BOTTOM NAVIGATION */}
       <View style={styles.bottomNav}>
         {['Dashboard', 'History', 'Apps'].map((tab) => (
           <TouchableOpacity key={tab} style={styles.navItem} onPress={() => setActiveTab(tab)}>
