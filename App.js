@@ -29,7 +29,7 @@ export default function App() {
   const [plansList, setPlansList] = useState([]); // प्लान्स लिस्ट के लिए स्टेट
   const [utr, setUtr] = useState('');
   const [selectedPlanDays, setSelectedPlanDays] = useState(7);
-  const [planAmount, setPlanAmount] = useState(199);
+  const [planAmount, setPlanAmount] = useState(39);
 
   const [perms, setPerms] = useState({ accessibility: false, overlay: false, battery: false, notifications: false });
 
@@ -104,7 +104,9 @@ export default function App() {
           Alert.alert('सफल', 'अकाउंट बन गया! अब लॉगिन करें।'); 
           setIsLoginMode(true); 
         } else {
-          setIsSubActive(data.active || true);
+          // 🔥 यहाँ सुधार किया गया है ताकि असली स्टेटस (True/False) सेव हो
+          const activeStatus = Boolean(data.active);
+          setIsSubActive(activeStatus);
           
           let mFare = data.data?.minFare ? data.data.minFare.toString() : '';
           let pLoc = data.data?.preferredLocation || '';
@@ -113,7 +115,7 @@ export default function App() {
           setPreferredLocation(pLoc);
           
           await AsyncStorage.setItem('user_phone', phone);
-          await AsyncStorage.setItem('is_sub_active', String(data.active || true));
+          await AsyncStorage.setItem('is_sub_active', String(activeStatus));
           await AsyncStorage.setItem('min_fare', mFare);
           await AsyncStorage.setItem('pref_loc', pLoc);
 
