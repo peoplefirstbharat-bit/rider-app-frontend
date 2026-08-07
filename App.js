@@ -12,6 +12,7 @@ export default function App() {
   const [isLoginMode, setIsLoginMode] = useState(true);
   const [activeTab, setActiveTab] = useState('Dashboard'); 
   const [showPayment, setShowPayment] = useState(false);
+  const [refreshingPlan, setRefreshingPlan] = useState(false); // 🚀 रिफ्रेश लोड स्टेट
 
   const [phone, setPhone] = useState('');
   const [pin, setPin] = useState('');
@@ -32,7 +33,6 @@ export default function App() {
   const [selectedPlanDays, setSelectedPlanDays] = useState(1);
   const [planAmount, setPlanAmount] = useState(10);
 
-  // 🚀 परमिशंस स्टेट
   const [perms, setPerms] = useState({ accessibility: false, overlay: false, battery: false, notifications: false });
 
   const [appsStatus, setAppsStatus] = useState([
@@ -61,7 +61,7 @@ export default function App() {
     checkLoginStatus();
     fetchPlans();
     checkInstalledApps();
-    checkRealPermissions(); // 🚀 ऐप खुलते ही परमिशन चेक करें
+    checkRealPermissions();
   }, []);
 
   useEffect(() => {
@@ -69,18 +69,15 @@ export default function App() {
       if (nextAppState === 'active') {
         if (isLoggedIn && phone) syncSubscriptionStatus();
         checkInstalledApps();
-        checkRealPermissions(); // 🚀 बैकग्राउंड से लौटने पर भी परमिशन चेक करें
+        checkRealPermissions();
       }
     });
     return () => subscription.remove();
   }, [isLoggedIn, phone]);
 
-  // 🚀 असली परमिशन चेक करने का स्मार्ट तरीका
   const checkRealPermissions = async () => {
     if (Platform.OS !== 'android') return;
     try {
-      // चूंकि React Native में डायरेक्ट यह पता लगाना मुश्किल है कि Accessibility ऑन है या नहीं, 
-      // हम यूजर के पिछले अनुभव और AsyncStorage का इस्तेमाल करेंगे ताकि बार-बार 'Fix' न दिखाए।
       const accSaved = await AsyncStorage.getItem('perm_acc');
       const overSaved = await AsyncStorage.getItem('perm_over');
       const batSaved = await AsyncStorage.getItem('perm_bat');
@@ -107,6 +104,7 @@ export default function App() {
     setAppsStatus(updatedApps);
   };
 
+  // 🚀 सुधरा हुआ और पावरफुल सिंक फंक्शन
   const syncSubscriptionStatus = async () => {
     try {
       const response = await fetch(`${BACKEND_URL}/api/check-subscription`, {
@@ -120,9 +118,16 @@ export default function App() {
       if (!activeStatus && serviceOn) {
         setServiceOn(false);
         if (FilterBridge && FilterBridge.setServiceStatus) FilterBridge.setServiceStatus(false);
-        Alert.alert('Plan Expired', 'आपका प्लान ख़त्म हो गया है। कृपया रीचार्ज करें।');
       }
     } catch (error) {}
+  };
+
+  // 🚀 मैन्युअल प्लान रिफ्रेश बटन के लिए
+  const handleManualRefreshPlan = async () => {
+    setRefreshingPlan(true);
+    await syncSubscriptionStatus();
+    setRefreshingPlan(false);
+    Alert.alert("Success", isSubActive ? "आपका प्लान एक्टिव है! ✅" : "अभी भी प्लान एक्टिव नहीं है। कृपया UTR चेक करें या एडमिन से संपर्क करें।");
   };
 
   const checkLoginStatus = async () => {
@@ -206,10 +211,8 @@ export default function App() {
     if (FilterBridge && FilterBridge.setServiceStatus) FilterBridge.setServiceStatus(false);
   };
 
-  // 🚀 फेयर सेव करने का फूलप्रूफ तरीका (लोकल स्टोरेज + सर्वर)
   const saveFilters = async () => {
     try {
-      // सबसे पहले मोबाइल के अंदर तुरंत सेव करो ताकि उड़े नहीं
       await AsyncStorage.setItem('min_fare', minFare);
       await AsyncStorage.setItem('max_fare', maxFare);
       await AsyncStorage.setItem('pref_loc', preferredLocation);
@@ -220,7 +223,6 @@ export default function App() {
 
       Alert.alert('Saved', 'Filters updated successfully!');
 
-      // फिर बैकग्राउंड में सर्वर पर भेजने की कोशिश करो
       fetch(`${BACKEND_URL}/api/settings`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, 
         body: JSON.stringify({ phone, minFare: Number(minFare), maxFare: Number(maxFare), preferredLocation })
@@ -555,6 +557,11 @@ export default function App() {
               </View>
             </View>
 
+            {/* 🚀 नया रिफ्रेश प्लान बटन */}
+            <TouchableOpacity style={[styles.primaryBtn, {marginBottom: 15}]} onPress={handleManualRefreshPlan} disabled={refreshingPlan}>
+              {refreshingPlan ? <ActivityIndicator color="#000" /> : <Text style={styles.primaryBtnTxt}>🔄 REFRESH PLAN STATUS</Text>}
+            </TouchableOpacity>
+
             <View style={styles.sectionCard}>
                <Text style={styles.sectionTitle}>Account Actions</Text>
                <TouchableOpacity style={[styles.secondaryBtn, {borderColor: '#FF4444'}]} onPress={handleLogout}>
@@ -617,7 +624,7 @@ const styles = StyleSheet.create({
   timelineBox: { backgroundColor: '#111B21', padding: 30, borderRadius: 15, alignItems: 'center' },
   appRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 15 },
   appIconGrid: { width: 40, height: 40, borderRadius: 10, backgroundColor: '#1E2A32', justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: '#2A3942' },
-  badgeMissing: { paddingHorizontal: 15, paddingVariable: 6, borderRadius: 15, backgroundColor: '#1E2A32', borderWidth: 1, borderColor: '#2A3942' },
+  badgeMissing: { pkgHorizontal: 15, paddingVertical: 6, borderRadius: 15, backgroundColor: '#1E2A32', borderWidth: 1, borderColor: '#2A3942' },
   badgeAllowed: { paddingHorizontal: 15, paddingVertical: 6, borderRadius: 15, backgroundColor: 'rgba(0, 230, 118, 0.1)', borderWidth: 1, borderColor: '#00E676' },
   profileUserCard: { flexDirection: 'row', backgroundColor: '#111B21', padding: 20, borderRadius: 15, marginBottom: 15, alignItems: 'center' },
   profileAvatar: { width: 60, height: 60, borderRadius: 15, backgroundColor: '#FFD700', justifyContent: 'center', alignItems: 'center' },
