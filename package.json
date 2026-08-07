@@ -1,6 +1,7 @@
 {
-  "name": "rider-accept-frontend",
+  "name": "rider-accept-pro",
   "version": "1.0.0",
+  "main": "node_modules/expo/AppEntry.js",
   "scripts": {
     "start": "expo start",
     "android": "expo start --android",
@@ -8,10 +9,12 @@
     "web": "expo start --web"
   },
   "dependencies": {
-    "expo": "~51.0.0",
-    "expo-status-bar": "~1.12.1",
+    "expo": "~50.0.14",
+    "expo-status-bar": "~1.11.1",
     "react": "18.2.0",
-    "react-native": "0.74.1"
+    "react-native": "0.73.6",
+    "@react-native-async-storage/async-storage": "1.21.0",
+    "@expo/config-plugins": "~7.2.2"
   },
   "devDependencies": {
     "@babel/core": "^7.20.0"
