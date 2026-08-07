@@ -1,10 +1,10 @@
-const { withAndroidManifest, withDangerousMod } = require('@expo/config-plugins');
+const { withAndroidManifest, withDangerousMod, withMainApplication } = require('@expo/config-plugins');
 const fs = require('fs');
 const path = require('path');
 
 module.exports = function withAndroidAutomator(config) {
   
-  // 1. AndroidManifest.xml में ज़बरदस्ती परमिशन और सर्विस जोड़ना
+  // 1. AndroidManifest.xml में ज़बरदस्ती परमिशन और सर्विस जोड़ना (तुम्हारा ओरिजिनल कोड)
   config = withAndroidManifest(config, (config) => {
     const manifest = config.modResults;
     
@@ -33,7 +33,7 @@ module.exports = function withAndroidAutomator(config) {
     return config;
   });
 
-  // 2. बैकग्राउंड में नेटिव जावा इंजन जनरेट करना
+  // 2. बैकग्राउंड में नेटिव जावा इंजन जनरेट करना (तुम्हारा ओरिजिनल कोड)
   config = withDangerousMod(config, [
     'android',
     (config) => {
@@ -268,6 +268,45 @@ public class AutoClickService extends AccessibilityService {
       return config;
     }
   ]);
+
+  // 🚀 3. नया फिक्स: MainApplication में पैकेज को लिंक करना
+  config = withMainApplication(config, (config) => {
+    let content = config.modResults.contents;
+    
+    // Kotlin (Expo SDK 50+) को सपोर्ट करने के लिए
+    if (config.modResults.language === 'kt') {
+      if (!content.includes('com.rider.acceptpro.FilterBridgePackage')) {
+        content = content.replace(
+          /^package .*/m,
+          `$&\nimport com.rider.acceptpro.FilterBridgePackage`
+        );
+      }
+      if (!content.includes('add(FilterBridgePackage())')) {
+        content = content.replace(
+          /add\(MyReactNativePackage\(\)\)/,
+          `add(MyReactNativePackage())\n        add(FilterBridgePackage())`
+        );
+      }
+    }
+    // Java (पुराने वर्ज़न) को सपोर्ट करने के लिए
+    else if (config.modResults.language === 'java') {
+      if (!content.includes('com.rider.acceptpro.FilterBridgePackage')) {
+        content = content.replace(
+          /^package .*/m,
+          `$&\nimport com.rider.acceptpro.FilterBridgePackage;`
+        );
+      }
+      if (!content.includes('new FilterBridgePackage()')) {
+        content = content.replace(
+          /packages\.add\(new MyReactNativePackage\(\)\);/,
+          `packages.add(new MyReactNativePackage());\n          packages.add(new FilterBridgePackage());`
+        );
+      }
+    }
+
+    config.modResults.contents = content;
+    return config;
+  });
 
   return config;
 };
