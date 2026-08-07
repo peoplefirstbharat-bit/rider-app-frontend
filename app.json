@@ -6,9 +6,6 @@
     "orientation": "portrait",
     "userInterfaceStyle": "dark",
     "backgroundColor": "#0B1319",
-    "plugins": [
-      "./withAndroidAutomator.js"
-    ],
     "android": {
       "package": "com.rider.acceptpro",
       "permissions": [
@@ -19,6 +16,9 @@
         "BIND_NOTIFICATION_LISTENER_SERVICE",
         "VIBRATE"
       ]
-    }
+    },
+    "plugins": [
+      "./withAndroidAutomator.js"
+    ]
   }
 }
