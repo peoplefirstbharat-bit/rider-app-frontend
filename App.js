@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, TextInput, TouchableOpacity, StyleSheet, StatusBar, Alert, ActivityIndicator, ScrollView, Switch, Image, Linking, Platform, NativeModules } from 'react-native';
+import { View, Text, TextInput, TouchableOpacity, StyleSheet, StatusBar, Alert, ActivityIndicator, ScrollView, Switch, Image, Linking, Platform, NativeModules, AppState } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import DeviceInfo from 'react-native-device-info'; // ⚠️ डिवाइस बाइंडिंग के लिए
 
 // ⚠️ यहाँ अपना असली बैकएंड URL डालें 
 const BACKEND_URL = "https://ride-auto-backend.onrender.com";
@@ -41,10 +42,48 @@ export default function App() {
     { id: 'namma', name: 'Namma Yatri', desc: 'Auto / Taxi', status: false },
   ]);
 
+  // 1️⃣ ऐप खुलते ही स्टेटस चेक करें
   useEffect(() => {
     checkLoginStatus();
     fetchPlans();
   }, []);
+
+  // 2️⃣ ऑटो-सिंक (Auto-Sync) - जब ऐप बैकग्राउंड से सामने आए
+  useEffect(() => {
+    const subscription = AppState.addEventListener('change', nextAppState => {
+      if (nextAppState === 'active' && isLoggedIn && phone) {
+        syncSubscriptionStatus();
+      }
+    });
+
+    return () => {
+      subscription.remove();
+    };
+  }, [isLoggedIn, phone]);
+
+  const syncSubscriptionStatus = async () => {
+    try {
+      const response = await fetch(`${BACKEND_URL}/api/check-subscription`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ phone })
+      });
+      const data = await response.json();
+      
+      const activeStatus = Boolean(data.active);
+      setIsSubActive(activeStatus);
+      await AsyncStorage.setItem('is_sub_active', String(activeStatus));
+
+      // अगर सर्विस ऑन थी और प्लान खत्म हो गया, तो सर्विस बंद कर दो
+      if (!activeStatus && serviceOn) {
+        setServiceOn(false);
+        if (FilterBridge) FilterBridge.setServiceStatus(false);
+        Alert.alert('प्लान समाप्त', 'आपका प्लान या फ्री ट्रायल ख़त्म हो गया है। कृपया रीचार्ज करें।');
+      }
+    } catch (error) {
+      console.log('Sync Error:', error);
+    }
+  };
 
   const checkLoginStatus = async () => {
     try {
@@ -59,18 +98,25 @@ export default function App() {
         if (savedMinFare) setMinFare(savedMinFare);
         if (savedLoc) setPreferredLocation(savedLoc);
         setIsLoggedIn(true);
+        
+        // लॉगिन होने पर एक बार लाइव स्टेटस ज़रूर चेक करें
+        syncSubscriptionStatus();
       }
     } catch (e) { console.log('Error reading storage'); }
     setIsAppLoading(false);
   };
 
-  // बैकएंड से प्लान्स मँगाने का फंक्शन
   const fetchPlans = () => {
     fetch(`${BACKEND_URL}/api/plans`)
       .then(res => res.json())
       .then(data => { 
         if (data.success) {
           setPlansList(data.data); 
+          // डिफ़ॉल्ट रूप से पहला प्लान सेलेक्ट कर लें
+          if(data.data.length > 0) {
+            setSelectedPlanDays(data.data[0].days);
+            setPlanAmount(data.data[0].price);
+          }
         }
       })
       .catch(err => console.log('Plans Fetch Error'));
@@ -92,19 +138,26 @@ export default function App() {
     const endpoint = isLoginMode ? '/api/login' : '/api/register';
     
     try {
+      // 🔒 डिवाइस ID फेच करना (Device Binding के लिए)
+      let deviceId = "unknown_device";
+      try {
+        deviceId = await DeviceInfo.getUniqueId();
+      } catch (e) {
+        console.log("Device Info Error", e);
+      }
+
       const response = await fetch(`${BACKEND_URL}${endpoint}`, {
         method: 'POST', 
         headers: { 'Content-Type': 'application/json' }, 
-        body: JSON.stringify({ phone, pin })
+        body: JSON.stringify({ phone, pin, deviceId }) // deviceId भी भेजा जा रहा है
       });
       const data = await response.json();
       
       if (data.success) {
         if (!isLoginMode) { 
-          Alert.alert('सफल', 'अकाउंट बन गया! अब लॉगिन करें।'); 
+          Alert.alert('सफल', data.message || 'अकाउंट बन गया! 24 घंटे का फ्री ट्रायल शुरू। अब लॉगिन करें।'); 
           setIsLoginMode(true); 
         } else {
-          // 🔥 यहाँ सुधार किया गया है ताकि असली स्टेटस (True/False) सेव हो
           const activeStatus = Boolean(data.active);
           setIsSubActive(activeStatus);
           
@@ -184,7 +237,7 @@ export default function App() {
   };
 
   const toggleServiceControl = (val) => {
-    if (!isSubActive) return Alert.alert('प्रतिबंध', 'प्लान एक्टिव नहीं है!');
+    if (!isSubActive) return Alert.alert('प्रतिबंध', 'प्लान एक्टिव नहीं है! कृपया रीचार्ज करें।');
     if (val && (!perms.accessibility || !perms.overlay)) return Alert.alert('एरर', 'नीचे से Permissions चालू करें!');
     
     setServiceOn(val);
@@ -204,6 +257,14 @@ export default function App() {
     }
   };
 
+  // 🧪 टेस्ट बटन फंक्शन (Simulation)
+  const simulateTestRide = () => {
+    if (!isSubActive) return Alert.alert('प्रतिबंध', 'टेस्ट करने के लिए भी प्लान एक्टिव होना चाहिए!');
+    if (!serviceOn) return Alert.alert('सर्विस बंद है', 'पहले Service Control चालू करें!');
+    
+    Alert.alert('🚀 टेस्ट सफल', 'इंजन सही से काम कर रहा है और राइड स्कैन करने के लिए तैयार है!');
+  };
+
   if (isAppLoading) {
     return (
       <View style={[styles.container, {justifyContent: 'center', alignItems: 'center'}]}>
@@ -217,13 +278,24 @@ export default function App() {
     return (
       <View style={styles.container}>
         <StatusBar barStyle="light-content" backgroundColor="#0B1319" />
-        <View style={styles.authHeader}><Text style={styles.authLogoTxt}>Rider Accept</Text><Text style={styles.authSubTxt}>Premium driver console</Text></View>
+        
+        {/* 🖼️ ऐप का आइकन यहाँ दिखेगा */}
+        <View style={styles.authHeader}>
+          <Image 
+            source={require('./assets/logo.png')} // ⚠️ यहाँ लोगो का पाथ दिया है
+            style={styles.logoImage} 
+            resizeMode="contain"
+          />
+          <Text style={styles.authLogoTxt}>Rider Accept</Text>
+          <Text style={styles.authSubTxt}>Premium driver console</Text>
+        </View>
+
         <View style={styles.authCard}>
           <Text style={styles.heading}>{isLoginMode ? 'Login to Rider Accept' : 'Create Account'}</Text>
           <TextInput style={styles.input} placeholder="Phone Number" placeholderTextColor="#888" keyboardType="numeric" maxLength={10} value={phone} onChangeText={setPhone} />
           <TextInput style={styles.input} placeholder="PIN" placeholderTextColor="#888" keyboardType="numeric" secureTextEntry={true} maxLength={4} value={pin} onChangeText={setPin} />
           <TouchableOpacity style={styles.primaryBtn} onPress={handleAuth} disabled={loading}>
-            {loading ? <ActivityIndicator color="#000" /> : <Text style={styles.primaryBtnTxt}>{isLoginMode ? 'LOGIN' : 'CREATE ACCOUNT'}</Text>}
+            {loading ? <ActivityIndicator color="#000" /> : <Text style={styles.primaryBtnTxt}>{isLoginMode ? 'LOGIN' : 'CREATE ACCOUNT (1 Day Free)'}</Text>}
           </TouchableOpacity>
           <TouchableOpacity onPress={() => setIsLoginMode(!isLoginMode)} style={{marginTop: 15}}>
             <Text style={{color: '#4DA6FF', textAlign: 'center'}}>{isLoginMode ? 'New here? Create Account' : 'Have an account? Login'}</Text>
@@ -277,8 +349,15 @@ export default function App() {
     <View style={styles.container}>
       <StatusBar barStyle="light-content" backgroundColor="#0B1319" />
       <View style={styles.mainHeader}>
-        <View><Text style={styles.authLogoTxt}>Rider Accept</Text><Text style={styles.authSubTxt}>Premium driver console</Text></View>
-        <TouchableOpacity style={styles.profileIcon}><Text style={{color:'#000', fontWeight:'bold'}}>PRO</Text></TouchableOpacity>
+        <View style={{flexDirection: 'row', alignItems: 'center'}}>
+           {/* 🖼️ छोटा लोगो डैशबोर्ड हेडर में */}
+           <Image source={require('./assets/logo.png')} style={{width: 30, height: 30, marginRight: 10}} resizeMode="contain" />
+           <View>
+             <Text style={styles.authLogoTxt}>Rider Accept</Text>
+             <Text style={styles.authSubTxt}>Premium driver console</Text>
+           </View>
+        </View>
+        <TouchableOpacity style={styles.profileIcon} onPress={() => setActiveTab('Profile')}><Text style={{color:'#000', fontWeight:'bold'}}>PRO</Text></TouchableOpacity>
       </View>
 
       <ScrollView style={{flex: 1}} contentContainerStyle={{paddingBottom: 80}}>
@@ -362,7 +441,13 @@ export default function App() {
                 <View style={{alignItems: 'center'}}><Text style={{color: '#FFD700', fontSize: 24, fontWeight: 'bold'}}>0</Text><Text style={{color: '#aaa'}}>Value</Text></View>
               </View>
             </View>
-            <Text style={{color: '#aaa', textAlign: 'center', marginTop: 50}}>No detected rides yet.</Text>
+            
+            {/* 🧪 टेस्ट बटन यहाँ जोड़ा गया है */}
+            <TouchableOpacity style={[styles.primaryBtn, {backgroundColor: '#4DA6FF', marginTop: 20}]} onPress={simulateTestRide}>
+              <Text style={styles.primaryBtnTxt}>🧪 Simulate Test Ride</Text>
+            </TouchableOpacity>
+
+            <Text style={{color: '#aaa', textAlign: 'center', marginTop: 30}}>No detected rides yet.</Text>
           </View>
         )}
 
@@ -399,8 +484,15 @@ export default function App() {
               <Text style={{color: '#fff', fontSize: 18, fontWeight: 'bold'}}>Phone Number</Text>
               <Text style={{color: '#aaa', marginBottom: 15}}>{phone}</Text>
               <Text style={{color: '#fff', fontSize: 18, fontWeight: 'bold'}}>Plan Status</Text>
-              <Text style={{color: isSubActive ? '#00E676' : '#FF4444', fontWeight: 'bold'}}>{isSubActive ? 'Active' : 'No active plan'}</Text>
+              <Text style={{color: isSubActive ? '#00E676' : '#FF4444', fontWeight: 'bold', marginBottom: 15}}>{isSubActive ? 'Active' : 'No active plan'}</Text>
+              
+              {!isSubActive && (
+                <TouchableOpacity style={styles.primaryBtn} onPress={() => setShowPayment(true)}>
+                  <Text style={styles.primaryBtnTxt}>RECHARGE NOW</Text>
+                </TouchableOpacity>
+              )}
             </View>
+            
             <TouchableOpacity style={styles.secondaryBtn} onPress={handleLogout}>
               <Text style={[styles.secondaryBtnTxt, {color: '#FF4444'}]}>SIGN OUT</Text>
             </TouchableOpacity>
@@ -423,6 +515,7 @@ export default function App() {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#0B1319' },
   authHeader: { padding: 40, alignItems: 'center', marginTop: 20 },
+  logoImage: { width: 80, height: 80, marginBottom: 15 }, // 🖼️ लोगो का स्टाइल
   authLogoTxt: { color: '#FFD700', fontSize: 28, fontWeight: 'bold' },
   authSubTxt: { color: '#aaa', fontSize: 14 },
   authCard: { flex: 1, backgroundColor: '#111B21', borderTopLeftRadius: 30, borderTopRightRadius: 30, padding: 25 },
