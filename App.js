@@ -74,8 +74,12 @@ export default function App() {
     return () => subscription.remove();
   }, [isLoggedIn, phone]);
 
+  // 🚨 यहाँ अलर्ट वाला नया कोड फिक्स कर दिया गया है
   const checkInstalledApps = async () => {
-    if (!FilterBridge || !FilterBridge.checkAppInstalled) return;
+    if (!FilterBridge || !FilterBridge.checkAppInstalled) {
+      Alert.alert("⚠️ Linking Error", "Native Java Code लिंक नहीं हुआ है! बिल्ड में दिक्कत है।");
+      return;
+    }
     
     let updatedApps = [...appsStatus];
     for (let i = 0; i < updatedApps.length; i++) {
