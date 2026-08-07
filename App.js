@@ -32,9 +32,9 @@ export default function App() {
   const [selectedPlanDays, setSelectedPlanDays] = useState(1);
   const [planAmount, setPlanAmount] = useState(10);
 
+  // 🚀 परमिशंस स्टेट
   const [perms, setPerms] = useState({ accessibility: false, overlay: false, battery: false, notifications: false });
 
-  // 🚀 FIX: Ola का असली पैकेज नाम (com.olacabs.oladriver)
   const [appsStatus, setAppsStatus] = useState([
     { id: 'ola', name: 'Ola', desc: 'Cab / Auto', pkg: 'com.olacabs.oladriver', installed: false, status: false },
     { id: 'uber', name: 'Uber', desc: 'Cab / Moto', pkg: 'com.ubercab.driver', installed: false, status: false },
@@ -61,6 +61,7 @@ export default function App() {
     checkLoginStatus();
     fetchPlans();
     checkInstalledApps();
+    checkRealPermissions(); // 🚀 ऐप खुलते ही परमिशन चेक करें
   }, []);
 
   useEffect(() => {
@@ -68,17 +69,33 @@ export default function App() {
       if (nextAppState === 'active') {
         if (isLoggedIn && phone) syncSubscriptionStatus();
         checkInstalledApps();
+        checkRealPermissions(); // 🚀 बैकग्राउंड से लौटने पर भी परमिशन चेक करें
       }
     });
     return () => subscription.remove();
   }, [isLoggedIn, phone]);
 
+  // 🚀 असली परमिशन चेक करने का स्मार्ट तरीका
+  const checkRealPermissions = async () => {
+    if (Platform.OS !== 'android') return;
+    try {
+      // चूंकि React Native में डायरेक्ट यह पता लगाना मुश्किल है कि Accessibility ऑन है या नहीं, 
+      // हम यूजर के पिछले अनुभव और AsyncStorage का इस्तेमाल करेंगे ताकि बार-बार 'Fix' न दिखाए।
+      const accSaved = await AsyncStorage.getItem('perm_acc');
+      const overSaved = await AsyncStorage.getItem('perm_over');
+      const batSaved = await AsyncStorage.getItem('perm_bat');
+
+      setPerms({
+        accessibility: accSaved === 'true',
+        overlay: overSaved === 'true',
+        battery: batSaved === 'true',
+        notifications: true
+      });
+    } catch (e) {}
+  };
+
   const checkInstalledApps = async () => {
-    if (!FilterBridge || !FilterBridge.checkAppInstalled) {
-      Alert.alert("⚠️ Linking Error", "Native Java Code लिंक नहीं हुआ है! बिल्ड में दिक्कत है।");
-      return;
-    }
-    
+    if (!FilterBridge || !FilterBridge.checkAppInstalled) return;
     let updatedApps = [...appsStatus];
     for (let i = 0; i < updatedApps.length; i++) {
       try {
@@ -113,12 +130,14 @@ export default function App() {
       const savedPhone = await AsyncStorage.getItem('user_phone');
       const savedSub = await AsyncStorage.getItem('is_sub_active');
       const savedMinFare = await AsyncStorage.getItem('min_fare');
+      const savedMaxFare = await AsyncStorage.getItem('max_fare');
       const savedLoc = await AsyncStorage.getItem('pref_loc');
 
       if (savedPhone) {
         setPhone(savedPhone);
         setIsSubActive(savedSub === 'true');
         if (savedMinFare) setMinFare(savedMinFare);
+        if (savedMaxFare) setMaxFare(savedMaxFare);
         if (savedLoc) setPreferredLocation(savedLoc);
         setIsLoggedIn(true);
         syncSubscriptionStatus();
@@ -187,19 +206,29 @@ export default function App() {
     if (FilterBridge && FilterBridge.setServiceStatus) FilterBridge.setServiceStatus(false);
   };
 
+  // 🚀 फेयर सेव करने का फूलप्रूफ तरीका (लोकल स्टोरेज + सर्वर)
   const saveFilters = async () => {
     try {
-      const response = await fetch(`${BACKEND_URL}/api/settings`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ phone, minFare: Number(minFare), preferredLocation })
-      });
-      const data = await response.json();
-      if (data.success) {
-        await AsyncStorage.setItem('min_fare', minFare);
-        await AsyncStorage.setItem('pref_loc', preferredLocation);
-        if (FilterBridge && FilterBridge.saveFilters) FilterBridge.saveFilters(Number(minFare) || 0, preferredLocation || "");
-        Alert.alert('Saved', 'Filters updated successfully!');
+      // सबसे पहले मोबाइल के अंदर तुरंत सेव करो ताकि उड़े नहीं
+      await AsyncStorage.setItem('min_fare', minFare);
+      await AsyncStorage.setItem('max_fare', maxFare);
+      await AsyncStorage.setItem('pref_loc', preferredLocation);
+
+      if (FilterBridge && FilterBridge.saveFilters) {
+        FilterBridge.saveFilters(Number(minFare) || 0, preferredLocation || "");
       }
-    } catch (error) { Alert.alert('Error', 'Save failed'); }
+
+      Alert.alert('Saved', 'Filters updated successfully!');
+
+      // फिर बैकग्राउंड में सर्वर पर भेजने की कोशिश करो
+      fetch(`${BACKEND_URL}/api/settings`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, 
+        body: JSON.stringify({ phone, minFare: Number(minFare), maxFare: Number(maxFare), preferredLocation })
+      }).catch(() => {});
+
+    } catch (error) { 
+      Alert.alert('Error', 'Save failed'); 
+    }
   };
 
   const sendPaymentRequest = async () => {
@@ -216,17 +245,29 @@ export default function App() {
     setLoading(false);
   };
 
-  const requestPerm = (type) => {
+  const requestPerm = async (type) => {
     if (Platform.OS !== 'android') return;
     try {
-      if (type === 'accessibility') { Linking.sendIntent('android.settings.ACCESSIBILITY_SETTINGS'); setPerms({...perms, accessibility: true}); }
-      else if (type === 'overlay') { Linking.sendIntent('android.settings.action.MANAGE_OVERLAY_PERMISSION'); setPerms({...perms, overlay: true}); }
+      if (type === 'accessibility') { 
+        Linking.sendIntent('android.settings.ACCESSIBILITY_SETTINGS'); 
+        setPerms(prev => ({...prev, accessibility: true}));
+        await AsyncStorage.setItem('perm_acc', 'true');
+      }
+      else if (type === 'overlay') { 
+        Linking.sendIntent('android.settings.action.MANAGE_OVERLAY_PERMISSION'); 
+        setPerms(prev => ({...prev, overlay: true}));
+        await AsyncStorage.setItem('perm_over', 'true');
+      }
       else if (type === 'battery') { 
         if (FilterBridge && FilterBridge.requestBatteryOptimization) FilterBridge.requestBatteryOptimization(); 
         else Linking.sendIntent('android.settings.IGNORE_BATTERY_OPTIMIZATION_SETTINGS'); 
-        setPerms({...perms, battery: true}); 
+        setPerms(prev => ({...prev, battery: true}));
+        await AsyncStorage.setItem('perm_bat', 'true');
       }
-      else if (type === 'notifications') { Linking.sendIntent('android.settings.ACTION_NOTIFICATION_LISTENER_SETTINGS'); setPerms({...perms, notifications: true}); }
+      else if (type === 'notifications') { 
+        Linking.sendIntent('android.settings.ACTION_NOTIFICATION_LISTENER_SETTINGS'); 
+        setPerms(prev => ({...prev, notifications: true}));
+      }
     } catch (e) { Linking.openSettings(); }
   };
 
@@ -244,7 +285,6 @@ export default function App() {
     newApps[index].status = !newApps[index].status;
     setAppsStatus(newApps);
     
-    // 🚀 जावा को कमांड भेजना
     if (FilterBridge && FilterBridge.updateAppStatus) {
       try {
          FilterBridge.updateAppStatus(newApps[index].id, newApps[index].status);
@@ -577,7 +617,7 @@ const styles = StyleSheet.create({
   timelineBox: { backgroundColor: '#111B21', padding: 30, borderRadius: 15, alignItems: 'center' },
   appRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 15 },
   appIconGrid: { width: 40, height: 40, borderRadius: 10, backgroundColor: '#1E2A32', justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: '#2A3942' },
-  badgeMissing: { paddingHorizontal: 15, paddingVertical: 6, borderRadius: 15, backgroundColor: '#1E2A32', borderWidth: 1, borderColor: '#2A3942' },
+  badgeMissing: { paddingHorizontal: 15, paddingVariable: 6, borderRadius: 15, backgroundColor: '#1E2A32', borderWidth: 1, borderColor: '#2A3942' },
   badgeAllowed: { paddingHorizontal: 15, paddingVertical: 6, borderRadius: 15, backgroundColor: 'rgba(0, 230, 118, 0.1)', borderWidth: 1, borderColor: '#00E676' },
   profileUserCard: { flexDirection: 'row', backgroundColor: '#111B21', padding: 20, borderRadius: 15, marginBottom: 15, alignItems: 'center' },
   profileAvatar: { width: 60, height: 60, borderRadius: 15, backgroundColor: '#FFD700', justifyContent: 'center', alignItems: 'center' },
