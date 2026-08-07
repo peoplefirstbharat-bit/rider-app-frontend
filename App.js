@@ -257,14 +257,6 @@ export default function App() {
     }
   };
 
-  // 🧪 टेस्ट बटन फंक्शन (Simulation)
-  const simulateTestRide = () => {
-    if (!isSubActive) return Alert.alert('प्रतिबंध', 'टेस्ट करने के लिए भी प्लान एक्टिव होना चाहिए!');
-    if (!serviceOn) return Alert.alert('सर्विस बंद है', 'पहले Service Control चालू करें!');
-    
-    Alert.alert('🚀 टेस्ट सफल', 'इंजन सही से काम कर रहा है और राइड स्कैन करने के लिए तैयार है!');
-  };
-
   if (isAppLoading) {
     return (
       <View style={[styles.container, {justifyContent: 'center', alignItems: 'center'}]}>
@@ -441,13 +433,8 @@ export default function App() {
                 <View style={{alignItems: 'center'}}><Text style={{color: '#FFD700', fontSize: 24, fontWeight: 'bold'}}>0</Text><Text style={{color: '#aaa'}}>Value</Text></View>
               </View>
             </View>
-            
-            {/* 🧪 टेस्ट बटन यहाँ जोड़ा गया है */}
-            <TouchableOpacity style={[styles.primaryBtn, {backgroundColor: '#4DA6FF', marginTop: 20}]} onPress={simulateTestRide}>
-              <Text style={styles.primaryBtnTxt}>🧪 Simulate Test Ride</Text>
-            </TouchableOpacity>
 
-            <Text style={{color: '#aaa', textAlign: 'center', marginTop: 30}}>No detected rides yet.</Text>
+            <Text style={{color: '#aaa', textAlign: 'center', marginTop: 50}}>No detected rides yet.</Text>
           </View>
         )}
 
