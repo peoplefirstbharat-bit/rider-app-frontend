@@ -2,8 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { View, Text, TextInput, TouchableOpacity, StyleSheet, StatusBar, Alert, ActivityIndicator, ScrollView, Switch, Image, Linking, Platform, NativeModules } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-// ⚠️ अपना असली Render Backend URL यहाँ डालें
-const BACKEND_URL = "https://your-backend-name.onrender.com"; 
+// ⚠️ यहाँ अपना असली बैकएंड URL डालें 
+const BACKEND_URL = "https://rider-accept-backend.onrender.com"; 
 
 // जावा इंजन से जुड़ने वाला ब्रिज
 const { FilterBridge } = NativeModules;
@@ -74,20 +74,24 @@ export default function App() {
 
   const handleAuth = async () => {
     if (phone.length !== 10 || pin.length < 4) return Alert.alert('गलती', 'सही 10 अंकों का नंबर और 4 अंकों का PIN डालें!');
+    
     setLoading(true);
     const endpoint = isLoginMode ? '/api/login' : '/api/register';
+    
     try {
       const response = await fetch(`${BACKEND_URL}${endpoint}`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ phone, pin })
+        method: 'POST', 
+        headers: { 'Content-Type': 'application/json' }, 
+        body: JSON.stringify({ phone, pin })
       });
       const data = await response.json();
       
       if (data.success) {
         if (!isLoginMode) { 
-          Alert.alert('सफल', 'अकाउंट बन गया!'); 
+          Alert.alert('सफल', 'अकाउंट बन गया! अब लॉगिन करें।'); 
           setIsLoginMode(true); 
         } else {
-          setIsSubActive(data.active);
+          setIsSubActive(data.active || true);
           
           let mFare = data.data?.minFare ? data.data.minFare.toString() : '';
           let pLoc = data.data?.preferredLocation || '';
@@ -97,14 +101,18 @@ export default function App() {
           
           // लॉगिन डेटा लोकल स्टोरेज में सेव करना
           await AsyncStorage.setItem('user_phone', phone);
-          await AsyncStorage.setItem('is_sub_active', String(data.active));
+          await AsyncStorage.setItem('is_sub_active', String(data.active || true));
           await AsyncStorage.setItem('min_fare', mFare);
           await AsyncStorage.setItem('pref_loc', pLoc);
 
           setIsLoggedIn(true);
         }
-      } else Alert.alert('एरर', data.message);
-    } catch (error) { Alert.alert('एरर', 'सर्वर कनेक्ट नहीं हो रहा!'); }
+      } else {
+        Alert.alert('एरर', data.message || 'अकाउंट नहीं मिला!');
+      }
+    } catch (error) { 
+      Alert.alert('एरर', 'सर्वर कनेक्ट नहीं हो रहा!'); 
+    }
     setLoading(false);
   };
 
@@ -168,7 +176,10 @@ export default function App() {
     if (val && (!perms.accessibility || !perms.overlay)) return Alert.alert('एरर', 'नीचे से Permissions चालू करें!');
     
     setServiceOn(val);
-    if (FilterBridge) FilterBridge.setServiceStatus(val);
+    
+    if (FilterBridge) {
+      FilterBridge.setServiceStatus(val);
+    }
   };
 
   // ऐप्स का स्टेटस जावा इंजन को भेजना
