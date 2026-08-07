@@ -34,11 +34,11 @@ export default function App() {
 
   const [perms, setPerms] = useState({ accessibility: false, overlay: false, battery: false, notifications: false });
 
-  // 🚀 FIXED: असली और सही पैकेज नेम्स (Real Driver App Package Names)
+  // 🚀 FIX 1: Rapido Captain का असली पैकेज नाम (com.rapido.rider)
   const [appsStatus, setAppsStatus] = useState([
     { id: 'ola', name: 'Ola', desc: 'Cab / Auto', pkg: 'com.olacabs.partner', installed: false, status: false },
     { id: 'uber', name: 'Uber', desc: 'Cab / Moto', pkg: 'com.ubercab.driver', installed: false, status: false },
-    { id: 'rapido', name: 'Rapido', desc: 'Bike taxi', pkg: 'com.rapido.passenger.to', installed: false, status: false },
+    { id: 'rapido', name: 'Rapido', desc: 'Bike taxi', pkg: 'com.rapido.rider', installed: false, status: false },
     { id: 'namma', name: 'Namma Yatri', desc: 'Auto / Taxi', pkg: 'in.juspay.nammayatripartner', installed: false, status: false },
     { id: 'indrive', name: 'inDrive', desc: 'Ride sharing', pkg: 'sinet.startup.inDriver', installed: false, status: false },
     { id: 'blusmart', name: 'BluSmart', desc: 'EV cab', pkg: 'com.blusmart.driver', installed: false, status: false },
@@ -54,7 +54,6 @@ export default function App() {
       }));
       setRecentRides(prev => [{ id: Date.now(), fare, time: new Date().toLocaleTimeString() }, ...prev]);
     });
-
     return () => rideListener.remove();
   }, []);
 
@@ -74,7 +73,6 @@ export default function App() {
     return () => subscription.remove();
   }, [isLoggedIn, phone]);
 
-  // 🚨 यहाँ अलर्ट वाला नया कोड फिक्स कर दिया गया है
   const checkInstalledApps = async () => {
     if (!FilterBridge || !FilterBridge.checkAppInstalled) {
       Alert.alert("⚠️ Linking Error", "Native Java Code लिंक नहीं हुआ है! बिल्ड में दिक्कत है।");
@@ -104,7 +102,7 @@ export default function App() {
 
       if (!activeStatus && serviceOn) {
         setServiceOn(false);
-        if (FilterBridge) FilterBridge.setServiceStatus(false);
+        if (FilterBridge && FilterBridge.setServiceStatus) FilterBridge.setServiceStatus(false);
         Alert.alert('Plan Expired', 'आपका प्लान ख़त्म हो गया है। कृपया रीचार्ज करें।');
       }
     } catch (error) {}
@@ -137,12 +135,6 @@ export default function App() {
           setPlansList(data.data); 
           setSelectedPlanDays(data.data[0].days);
           setPlanAmount(data.data[0].price);
-        } else {
-          setPlansList([
-            { name: 'Daily Pass', days: 1, price: 10, description: '1 दिन के लिए सभी फीचर्स अनलॉक' },
-            { name: 'Weekly Pass', days: 7, price: 50, description: '7 दिनों के लिए गॉड-मोड' },
-            { name: 'Monthly Pass', days: 30, price: 200, description: '30 दिनों के लिए अनलिमिटेड एक्सेस' }
-          ]);
         }
       }).catch(() => {});
   };
@@ -165,8 +157,7 @@ export default function App() {
       try { deviceId = await DeviceInfo.getUniqueId(); } catch (e) {}
 
       const response = await fetch(`${BACKEND_URL}${endpoint}`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' }, 
-        body: JSON.stringify({ phone, pin, deviceId })
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ phone, pin, deviceId })
       });
       const data = await response.json();
       
@@ -193,20 +184,19 @@ export default function App() {
   const handleLogout = async () => {
     await AsyncStorage.clear();
     setIsLoggedIn(false); setPhone(''); setPin('');
-    if (FilterBridge) FilterBridge.setServiceStatus(false);
+    if (FilterBridge && FilterBridge.setServiceStatus) FilterBridge.setServiceStatus(false);
   };
 
   const saveFilters = async () => {
     try {
       const response = await fetch(`${BACKEND_URL}/api/settings`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ phone, minFare: Number(minFare), preferredLocation })
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ phone, minFare: Number(minFare), preferredLocation })
       });
       const data = await response.json();
       if (data.success) {
         await AsyncStorage.setItem('min_fare', minFare);
         await AsyncStorage.setItem('pref_loc', preferredLocation);
-        if (FilterBridge) FilterBridge.saveFilters(Number(minFare) || 0, preferredLocation || "");
+        if (FilterBridge && FilterBridge.saveFilters) FilterBridge.saveFilters(Number(minFare) || 0, preferredLocation || "");
         Alert.alert('Saved', 'Filters updated successfully!');
       }
     } catch (error) { Alert.alert('Error', 'Save failed'); }
@@ -217,8 +207,7 @@ export default function App() {
     setLoading(true);
     try {
       const response = await fetch(`${BACKEND_URL}/api/payment-request`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ phone, utr, planDays: selectedPlanDays, amount: planAmount })
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ phone, utr, planDays: selectedPlanDays, amount: planAmount })
       });
       const data = await response.json();
       if (data.success) { Alert.alert('Success', 'Request sent for Admin approval!'); setShowPayment(false); setUtr(''); } 
@@ -233,11 +222,8 @@ export default function App() {
       if (type === 'accessibility') { Linking.sendIntent('android.settings.ACCESSIBILITY_SETTINGS'); setPerms({...perms, accessibility: true}); }
       else if (type === 'overlay') { Linking.sendIntent('android.settings.action.MANAGE_OVERLAY_PERMISSION'); setPerms({...perms, overlay: true}); }
       else if (type === 'battery') { 
-        if (FilterBridge && FilterBridge.requestBatteryOptimization) {
-          FilterBridge.requestBatteryOptimization(); 
-        } else {
-          Linking.sendIntent('android.settings.IGNORE_BATTERY_OPTIMIZATION_SETTINGS'); 
-        }
+        if (FilterBridge && FilterBridge.requestBatteryOptimization) FilterBridge.requestBatteryOptimization(); 
+        else Linking.sendIntent('android.settings.IGNORE_BATTERY_OPTIMIZATION_SETTINGS'); 
         setPerms({...perms, battery: true}); 
       }
       else if (type === 'notifications') { Linking.sendIntent('android.settings.ACTION_NOTIFICATION_LISTENER_SETTINGS'); setPerms({...perms, notifications: true}); }
@@ -248,16 +234,22 @@ export default function App() {
     if (!isSubActive) return Alert.alert('Plan Inactive', 'Please activate a plan first.');
     if (val && (!perms.accessibility || !perms.overlay)) return Alert.alert('Permissions Required', 'Enable Overlay & Accessibility from Settings!');
     setServiceOn(val);
-    if (FilterBridge) FilterBridge.setServiceStatus(val);
+    if (FilterBridge && FilterBridge.setServiceStatus) FilterBridge.setServiceStatus(val);
   };
 
+  // 🚀 FIX 2: क्रैश रोकने वाला सेफ़्टी गार्ड
   const toggleAppStatus = (index) => {
     const newApps = [...appsStatus];
     if (!newApps[index].installed) return; 
     
     newApps[index].status = !newApps[index].status;
     setAppsStatus(newApps);
-    if (FilterBridge) FilterBridge.updateAppStatus(newApps[index].id, newApps[index].status);
+    
+    if (FilterBridge && FilterBridge.updateAppStatus) {
+      try {
+         FilterBridge.updateAppStatus(newApps[index].id, newApps[index].status);
+      } catch(e) {}
+    }
   };
 
   if (isAppLoading) {
@@ -350,7 +342,6 @@ export default function App() {
       </View>
 
       <ScrollView style={{flex: 1}} contentContainerStyle={{paddingBottom: 80}}>
-        
         {activeTab === 'Dashboard' && (
           <View style={styles.tabContent}>
             
@@ -562,51 +553,41 @@ const styles = StyleSheet.create({
   cyanBtnTxt: { color: '#000', fontWeight: 'bold', fontSize: 14 },
   secondaryBtn: { backgroundColor: '#111B21', padding: 15, borderRadius: 10, alignItems: 'center', borderWidth: 1, borderColor: '#2A3942' },
   secondaryBtnTxt: { color: '#fff', fontWeight: 'bold', fontSize: 16 },
-  
   mainHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 15, backgroundColor: '#0B1319' },
   profileIcon: { backgroundColor: '#1E2A32', paddingHorizontal: 15, paddingVertical: 8, borderRadius: 20, borderWidth: 1, borderColor: '#2A3942' },
   tabContent: { padding: 15 },
-  
   profitCard: { backgroundColor: '#111B21', padding: 20, borderRadius: 15, marginBottom: 15, borderWidth: 1 },
   pillBox: { backgroundColor: '#1E2A32', padding: 10, borderRadius: 10, flex: 1 },
   pillTextTop: { color: '#FFD700', fontSize: 9, fontWeight: 'bold' },
   pillTextBottom: { color: '#fff', fontSize: 14, fontWeight: 'bold', marginTop: 2 },
   toggleBtn: { position: 'absolute', top: 15, right: 15, paddingHorizontal: 15, paddingVertical: 8, borderRadius: 20 },
-  
   planBanner: { flexDirection: 'row', backgroundColor: '#1E1A0F', padding: 15, borderRadius: 15, alignItems: 'center', marginBottom: 15, borderWidth: 1, borderColor: '#FFD700' },
   planBadge: { width: 40, height: 40, borderRadius: 20, backgroundColor: '#332700', justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: '#FFD700' },
-  
   sectionCard: { backgroundColor: '#111B21', padding: 15, borderRadius: 15, marginBottom: 15 },
   sectionTitle: { color: '#fff', fontSize: 16, fontWeight: 'bold', marginBottom: 15 },
   rowBetween: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   statusDot: { width: 50, height: 50, borderRadius: 25, justifyContent: 'center', alignItems: 'center' },
-  
   permRow: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#1E2A32', padding: 12, borderRadius: 10, marginBottom: 10 },
   permIconBox: { width: 40, height: 40, borderRadius: 8, backgroundColor: '#2A3942', justifyContent: 'center', alignItems: 'center' },
   fixBtn: { backgroundColor: 'rgba(255, 68, 68, 0.2)', paddingVertical: 8, paddingHorizontal: 15, borderRadius: 20, borderWidth: 1, borderColor: '#FF4444' },
   fixBtnOk: { backgroundColor: 'rgba(0, 230, 118, 0.2)', borderColor: '#00E676' },
   fixBtnTxt: { color: '#fff', fontWeight: 'bold', fontSize: 12 },
-
   historyCard: { backgroundColor: '#111B21', padding: 20, borderRadius: 15, borderWidth: 1, borderColor: '#1E2A32' },
   historyStatBox: { backgroundColor: '#1E2A32', padding: 15, borderRadius: 10, width: '30%', alignItems: 'center', borderWidth: 1, borderColor: '#2A3942' },
   timelineBox: { backgroundColor: '#111B21', padding: 30, borderRadius: 15, alignItems: 'center' },
-  
   appRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 15 },
   appIconGrid: { width: 40, height: 40, borderRadius: 10, backgroundColor: '#1E2A32', justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: '#2A3942' },
   badgeMissing: { paddingHorizontal: 15, paddingVertical: 6, borderRadius: 15, backgroundColor: '#1E2A32', borderWidth: 1, borderColor: '#2A3942' },
   badgeAllowed: { paddingHorizontal: 15, paddingVertical: 6, borderRadius: 15, backgroundColor: 'rgba(0, 230, 118, 0.1)', borderWidth: 1, borderColor: '#00E676' },
-  
   profileUserCard: { flexDirection: 'row', backgroundColor: '#111B21', padding: 20, borderRadius: 15, marginBottom: 15, alignItems: 'center' },
   profileAvatar: { width: 60, height: 60, borderRadius: 15, backgroundColor: '#FFD700', justifyContent: 'center', alignItems: 'center' },
   roleBadge: { backgroundColor: '#332700', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 10, alignSelf: 'flex-start', marginTop: 5, borderWidth: 1, borderColor: '#FFD700' },
   profilePlanCard: { flexDirection: 'row', backgroundColor: '#111B21', padding: 20, borderRadius: 15, marginBottom: 15, alignItems: 'center' },
   planRing: { width: 60, height: 60, borderRadius: 30, borderWidth: 4, borderColor: '#1E2A32', borderTopColor: '#00E676', justifyContent: 'center', alignItems: 'center' },
-  
   planContainer: { marginBottom: 20 },
   planRow: { backgroundColor: '#1E2A32', padding: 20, borderRadius: 10, marginBottom: 10, borderWidth: 1, borderColor: 'transparent' },
   planRowActive: { backgroundColor: '#FFD700' },
   qrBox: { backgroundColor: '#1E2A32', padding: 20, borderRadius: 15, alignItems: 'center', marginBottom: 20, borderWidth: 1, borderColor: '#2A3942' },
-  
   bottomNav: { position: 'absolute', bottom: 0, width: '100%', flexDirection: 'row', backgroundColor: '#0B1319', borderTopWidth: 1, borderTopColor: '#1E2A32', paddingBottom: Platform.OS === 'ios' ? 20 : 0 },
   navItem: { flex: 1, alignItems: 'center', paddingVertical: 10 }
 });
