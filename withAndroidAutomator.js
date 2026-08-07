@@ -8,7 +8,6 @@ module.exports = function withAndroidAutomator(config) {
   config = withAndroidManifest(config, (config) => {
     const manifest = config.modResults;
     
-    // Android 11+ के लिए Package Visibility (<queries> टैग)
     if (!manifest.manifest.queries) {
         manifest.manifest.queries = [{ package: [] }];
     } else if (!manifest.manifest.queries[0].package) {
@@ -267,42 +266,34 @@ public class AutoClickService extends AccessibilityService {
     }
   ]);
 
-  // 🚀 FIX 3: अचूक लिंकिंग कोड (100% Foolproof)
+  // 🚀 ब्रह्मास्त्र फिक्स (100% Foolproof Linking) 
   config = withMainApplication(config, (config) => {
     let content = config.modResults.contents;
     
-    // Kotlin (Expo 50+) के लिए
+    // Kotlin के लिए (Expo 50+)
     if (config.modResults.language === 'kt') {
-      if (!content.includes('FilterBridgePackage')) {
-        // हम सीधे Expo के डिफ़ॉल्ट कमेंट को टारगेट कर रहे हैं, जो कभी फेल नहीं होगा
-        if (content.includes('// add(MyReactNativePackage())')) {
-            content = content.replace(
-                '// add(MyReactNativePackage())',
-                '// add(MyReactNativePackage())\n          add(com.rider.acceptpro.FilterBridgePackage())'
-            );
-        } else {
-            // बैकअप तरीका अगर कमेंट नहीं मिला
-            content = content.replace(
-                /PackageList\(this\)\.packages\.apply\s*\{/g,
-                'PackageList(this).packages.apply {\n          add(com.rider.acceptpro.FilterBridgePackage())'
-            );
-        }
+      if (!content.includes('com.rider.acceptpro.FilterBridgePackage')) {
+        // हम कमेंट्स को इग्नोर करके सीधा कोर लॉजिक को बदल रहे हैं!
+        content = content.replace(
+          /return PackageList\(this\)\.packages/g,
+          'val customPackagesList = PackageList(this).packages\n          customPackagesList.add(com.rider.acceptpro.FilterBridgePackage())\n          return customPackagesList'
+        );
       }
     } 
-    // Java (पुराने वर्ज़न) के लिए
+    // Java के लिए
     else if (config.modResults.language === 'java') {
-      if (!content.includes('FilterBridgePackage')) {
-         if (content.includes('// packages.add(new MyReactNativePackage());')) {
-             content = content.replace(
-                 '// packages.add(new MyReactNativePackage());',
-                 '// packages.add(new MyReactNativePackage());\n          packages.add(new com.rider.acceptpro.FilterBridgePackage());'
-             );
-         } else {
-             content = content.replace(
-                /return packages;/g,
-                'packages.add(new com.rider.acceptpro.FilterBridgePackage());\n      return packages;'
-             );
-         }
+      if (!content.includes('com.rider.acceptpro.FilterBridgePackage')) {
+        if (content.includes('List<ReactPackage> packages = new PackageList(this).getPackages();')) {
+            content = content.replace(
+                'List<ReactPackage> packages = new PackageList(this).getPackages();',
+                'List<ReactPackage> packages = new PackageList(this).getPackages();\n          packages.add(new com.rider.acceptpro.FilterBridgePackage());'
+            );
+        } else {
+            content = content.replace(
+                /return new PackageList\(this\)\.getPackages\(\);/g,
+                'List<ReactPackage> customPackagesList = new PackageList(this).getPackages();\n          customPackagesList.add(new com.rider.acceptpro.FilterBridgePackage());\n          return customPackagesList;'
+            );
+        }
       }
     }
     
