@@ -152,8 +152,9 @@ public class AutoClickService extends AccessibilityService {
             }
         }
 
+        // 🔥 यहीं पर वो MISTAKE थी, मैंने getChild(i) में 'i' जोड़ दिया है!
         for (int i = 0; i < node.getChildCount(); i++) {
-            scanAndAccept(node.getChild());
+            scanAndAccept(node.getChild(i)); 
         }
     }
 
@@ -186,7 +187,7 @@ public class AutoClickService extends AccessibilityService {
       
       return config;
     }
-  ]); // <-- यहीं पर मेरी गलती थी, मैंने यहाँ '})' लिख दिया था, जबकि '])' आना था।
+  ]);
 
   return config;
 };
