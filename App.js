@@ -1,11 +1,11 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, TextInput, TouchableOpacity, StyleSheet, StatusBar, Alert, ActivityIndicator, ScrollView, Switch, Image, Linking } from 'react-native';
+import { View, Text, TextInput, TouchableOpacity, StyleSheet, StatusBar, Alert, ActivityIndicator, ScrollView, Switch, Image, Linking, Platform } from 'react-native';
 
-// ⚠️ यहाँ अपने Render वाले बैकएंड का असली URL डालें (जैसे: https://your-app.onrender.com)
+// ⚠️ यहाँ अपने Render वाले बैकएंड का असली URL डालें (पीछे का स्लैश / न लगाएं)
 const BACKEND_URL = "https://your-backend-name.onrender.com"; 
 
 export default function App() {
-  const [currentScreen, setCurrentScreen] = useState('login'); // 'login', 'dashboard', 'settings', 'payment'
+  const [currentScreen, setCurrentScreen] = useState('login'); 
   const [isLoginMode, setIsLoginMode] = useState(true);
   
   // यूज़र डेटा
@@ -14,21 +14,32 @@ export default function App() {
   const [loading, setLoading] = useState(false);
   const [isSubActive, setIsSubActive] = useState(false);
 
-  // सेटिंग्स और फिल्टर्स
+  // सेटिंग्स और फिल्टर्स (Max Distance हटा दिया गया है)
   const [minFare, setMinFare] = useState('');
-  const [maxDistance, setMaxDistance] = useState('50');
   const [preferredLocation, setPreferredLocation] = useState('');
   
   // सर्विस कंट्रोल
   const [serviceOn, setServiceOn] = useState(false);
 
-  // डायनामिक पेमेंट डेटा (सर्वर से आएगा)
+  // डायनामिक पेमेंट डेटा
   const [paymentInfo, setPaymentInfo] = useState({ upiId: 'लोड हो रहा है...', upiNumber: 'लोड हो रहा है...', qrUrl: '' });
   const [utr, setUtr] = useState('');
   const [selectedPlanDays, setSelectedPlanDays] = useState(7);
-  const [planAmount, setPlanAmount] = useState(39); // नए आधे से भी कम दाम
+  const [planAmount, setPlanAmount] = useState(39); 
 
-  // 1. लॉगिन फंक्शन (एपि कॉल[span_1](start_span)[span_1](end_span))
+  // पेमेंट पेज खुलते ही ऑटोमैटिक सर्वर से QR और UPI ले आना
+  useEffect(() => {
+    if (currentScreen === 'payment') {
+      fetch(`${BACKEND_URL}/api/payment-info`)
+        .then(res => res.json())
+        .then(data => {
+          if (data.success) setPaymentInfo(data.data);
+        })
+        .catch(err => console.log('पेमेंट इन्फो फेच करने में एरर'));
+    }
+  }, [currentScreen]);
+
+  // 1. लॉगिन फंक्शन
   const handleLogin = async () => {
     if (phone.length !== 10 || pin.length < 4) {
       Alert.alert('गलती', 'कृपया सही 10 अंकों का नंबर और 4 अंकों का PIN डालें!');
@@ -47,7 +58,6 @@ export default function App() {
         setIsSubActive(data.active);
         if (data.data) {
           setMinFare(data.data.minFare ? data.data.minFare.toString() : '');
-          setMaxDistance(data.data.maxDistance ? data.data.maxDistance.toString() : '50');
           setPreferredLocation(data.data.preferredLocation || '');
         }
         setCurrentScreen('dashboard');
@@ -60,7 +70,7 @@ export default function App() {
     setLoading(false);
   };
 
-  // 2. रजिस्टर फंक्शन (एपि कॉल[span_2](start_span)[span_2](end_span))
+  // 2. रजिस्टर फंक्शन
   const handleRegister = async () => {
     if (phone.length !== 10 || pin.length < 4) {
       Alert.alert('गलती', 'कृपया सही 10 अंकों का नंबर और 4 अंकों का PIN डालें!');
@@ -87,7 +97,7 @@ export default function App() {
     setLoading(false);
   };
 
-  // 3. सेटिंग्स सेव करने का फंक्शन (एपि कॉल[span_3](start_span)[span_3](end_span))
+  // 3. सेटिंग्स सेव करने का फंक्शन
   const saveSettings = async () => {
     try {
       const response = await fetch(`${BACKEND_URL}/api/settings`, {
@@ -96,7 +106,6 @@ export default function App() {
         body: JSON.stringify({ 
           phone, 
           minFare: Number(minFare), 
-          maxDistance: Number(maxDistance), 
           preferredLocation 
         })
       });
@@ -109,20 +118,38 @@ export default function App() {
     }
   };
 
-  // 4. पेमेंट पेज खुलने पर सर्वर से UPI और QR मंगाना (एपि कॉल[span_4](start_span)[span_4](end_span))
-  const fetchPaymentInfo = async () => {
-    try {
-      const response = await fetch(`${BACKEND_URL}/api/payment-info`);
-      const data = await response.json();
-      if (data.success) {
-        setPaymentInfo(data.data);
-      }
-    } catch (error) {
-      console.log('पेमेंट इन्फो फेच करने में एरर');
+  // 4. सर्विस ऑन/ऑफ टॉगल (Accessibility Permission के साथ)
+  const toggleService = async (val) => {
+    if (!isSubActive) {
+      Alert.alert('प्रतिबंध', 'सर्विस चालू करने के लिए पहले प्लान एक्टिव करें!');
+      return;
+    }
+    
+    setServiceOn(val);
+
+    // अगर सर्विस ऑन की जा रही है, तो एंड्रॉइड की एक्सेसिबिलिटी सेटिंग खोलें
+    if (val) {
+      Alert.alert(
+        "परमिशन की ज़रूरत",
+        "ऑटो-राइड एक्सेप्ट करने के लिए कृपया अगली स्क्रीन पर 'Rider Accept Pro' को ON करें।",
+        [
+          { text: "कैंसिल", onPress: () => setServiceOn(false), style: "cancel" },
+          { 
+            text: "सेटिंग खोलें", 
+            onPress: () => {
+              if (Platform.OS === 'android') {
+                Linking.sendIntent('android.settings.ACCESSIBILITY_SETTINGS').catch(() => {
+                  Linking.openSettings(); // अगर Intent काम न करे तो डिफ़ॉल्ट सेटिंग खोलें
+                });
+              }
+            } 
+          }
+        ]
+      );
     }
   };
 
-  // 5. पेमेंट रिक्वेस्ट भेजने का फंक्शन (एपि कॉल[span_5](start_span)[span_5](end_span))
+  // 5. पेमेंट रिक्वेस्ट भेजने का फंक्शन
   const sendPaymentRequest = async () => {
     if (!utr || utr.length < 6) {
       Alert.alert('गलती', 'कृपया सही 12-अंकों का UTR / Transaction ID डालें!');
@@ -189,23 +216,14 @@ export default function App() {
           </Text>
 
           {!isSubActive && (
-            <TouchableOpacity style={[styles.primaryButton, {backgroundColor: '#FF4444', marginBottom: 15}]} onPress={() => { fetchPaymentInfo(); setCurrentScreen('payment'); }}>
+            <TouchableOpacity style={[styles.primaryButton, {backgroundColor: '#FF4444', marginBottom: 15}]} onPress={() => setCurrentScreen('payment')}>
               <Text style={styles.buttonText}>सस्ते प्लान्स खरीदें (Buy Plan)</Text>
             </TouchableOpacity>
           )}
 
           <View style={styles.row}>
             <Text style={{color: '#fff', fontSize: 16}}>ऑटो-एक्सेप्ट सर्विस</Text>
-            <Switch 
-              value={serviceOn} 
-              onValueChange={(val) => {
-                if(!isSubActive) {
-                  Alert.alert('प्रतिबंध', 'सर्विस चालू करने के लिए पहले प्लान एक्टिव करें!');
-                  return;
-                }
-                setServiceOn(val);
-              }} 
-            />
+            <Switch value={serviceOn} onValueChange={toggleService} />
           </View>
 
           <TouchableOpacity style={[styles.primaryButton, {backgroundColor: '#4DA6FF', marginTop: 20}]} onPress={() => setCurrentScreen('settings')}>
@@ -230,10 +248,11 @@ export default function App() {
         <View style={styles.card}>
           <Text style={styles.label}>न्यूनतम किराया (Min Fare ₹):</Text>
           <TextInput style={styles.input} keyboardType="numeric" placeholder="जैसे: 50" placeholderTextColor="#888" value={minFare} onChangeText={setMinFare} />
+          <Text style={{color: '#888', fontSize: 12, marginBottom: 15}}>*कम से कम इतने रुपये की राइड आएगी तभी ऐप एक्सेप्ट करेगा।</Text>
 
           <Text style={styles.label}>मनपसंद लोकेशन (Preferred Drop Location):</Text>
           <TextInput style={styles.input} placeholder="जैसे: Kanpur Central" placeholderTextColor="#888" value={preferredLocation} onChangeText={setPreferredLocation} />
-          <Text style={{color: '#888', fontSize: 12, marginBottom: 15}}>*इस लोकेशन की राइड आने पर ऐप बिना फेयर देखे तुरंत एक्सेप्ट कर लेगा!</Text>
+          <Text style={{color: '#888', fontSize: 12, marginBottom: 15}}>*अगर इस लोकेशन की राइड आती है, तो ऐप किराया देखे बिना तुरंत एक्सेप्ट कर लेगा! (Optional)</Text>
 
           <TouchableOpacity style={styles.primaryButton} onPress={saveSettings}>
             <Text style={styles.buttonText}>सेटिंग्स सेव करें</Text>
