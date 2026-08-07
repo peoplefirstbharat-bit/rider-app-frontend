@@ -3,14 +3,13 @@ const fs = require('fs');
 const path = require('path');
 
 module.exports = function withAndroidAutomator(config) {
-  // 1. AndroidManifest.xml में सर्विस और परमिशन जोड़ना
+  // 1. AndroidManifest.xml में Accessibility Service जोड़ना
   config = withAndroidManifest(config, (config) => {
     const manifest = config.modResults;
     const app = manifest.manifest.application[0];
 
     if (!app.service) app.service = [];
     
-    // Accessibility Service की एंट्री
     app.service.push({
       '$': {
         'android:name': '.AutoClickService',
@@ -31,21 +30,19 @@ module.exports = function withAndroidAutomator(config) {
     return config;
   });
 
-  // 2. हवा में Java और XML फाइलें जनरेट करना
+  // 2. बैकग्राउंड में सारे नेटिव जावा और XML इंजन जनरेट करना
   config = withDangerousMod(config, [
     'android',
     (config) => {
       const projectRoot = config.modRequest.projectRoot;
       
-      // फोल्डर का रास्ता (Path)
       const resXmlPath = path.join(projectRoot, 'android/app/src/main/res/xml');
       const javaPath = path.join(projectRoot, 'android/app/src/main/java/com/rider/acceptpro');
       
-      // फोल्डर बनाएं (अगर नहीं हैं)
       fs.mkdirSync(resXmlPath, { recursive: true });
       fs.mkdirSync(javaPath, { recursive: true });
       
-      // --- फाइल 1: XML Config ---
+      // --- XML Config ---
       const xmlContent = `<?xml version="1.0" encoding="utf-8"?>
 <accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
     android:accessibilityEventTypes="typeWindowContentChanged|typeWindowStateChanged"
@@ -54,8 +51,69 @@ module.exports = function withAndroidAutomator(config) {
     android:canRetrieveWindowContent="true"
     android:canPerformGestures="true" />`;
       
-      // --- फाइल 2: असली JAVA ऑटो-क्लिकर कोड ---
-      const javaContent = `package com.rider.acceptpro;
+      // --- Bridge Module (App.js से डेटा लेने के लिए) ---
+      const bridgeModuleContent = `package com.rider.acceptpro;
+import com.facebook.react.bridge.ReactApplicationContext;
+import com.facebook.react.bridge.ReactContextBaseJavaModule;
+import com.facebook.react.bridge.ReactMethod;
+
+public class FilterBridgeModule extends ReactContextBaseJavaModule {
+    public static int savedMinFare = 0;
+    public static String savedLocation = "";
+    public static boolean isServiceRunning = false;
+
+    public FilterBridgeModule(ReactApplicationContext context) {
+        super(context);
+    }
+
+    @Override
+    public String getName() {
+        return "FilterBridge";
+    }
+
+    @ReactMethod
+    public void saveFilters(int minFare, String location) {
+        savedMinFare = minFare;
+        savedLocation = location != null ? location.toLowerCase() : "";
+    }
+
+    @ReactMethod
+    public void setServiceStatus(boolean status) {
+        isServiceRunning = status;
+    }
+
+    @ReactMethod
+    public void updateAppStatus(String appId, boolean status) {
+        // यहाँ ऐप्स का स्टेटस स्टोर किया जा सकता है
+    }
+}`;
+
+      // --- Bridge Package ---
+      const bridgePackageContent = `package com.rider.acceptpro;
+import com.facebook.react.ReactPackage;
+import com.facebook.react.bridge.NativeModule;
+import com.facebook.react.bridge.ReactApplicationContext;
+import com.facebook.react.uimanager.ViewManager;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
+
+public class FilterBridgePackage implements ReactPackage {
+    @Override
+    public List<ViewManager> createViewManagers(ReactApplicationContext reactContext) {
+        return Collections.emptyList();
+    }
+
+    @Override
+    public List<NativeModule> createNativeModules(ReactApplicationContext reactContext) {
+        List<NativeModule> modules = new ArrayList<>();
+        modules.add(new FilterBridgeModule(reactContext));
+        return modules;
+    }
+}`;
+
+      // --- Main AutoClickService (असली रोबोट इंजन) ---
+      const serviceContent = `package com.rider.acceptpro;
 import android.accessibilityservice.AccessibilityService;
 import android.view.accessibility.AccessibilityEvent;
 import android.view.accessibility.AccessibilityNodeInfo;
@@ -64,41 +122,72 @@ import android.util.Log;
 public class AutoClickService extends AccessibilityService {
     @Override
     public void onAccessibilityEvent(AccessibilityEvent event) {
+        if (!FilterBridgeModule.isServiceRunning) return;
+
         AccessibilityNodeInfo rootNode = getRootInActiveWindow();
         if (rootNode != null) {
-            findAndClickAccept(rootNode);
+            scanAndAccept(rootNode);
         }
     }
 
-    private void findAndClickAccept(AccessibilityNodeInfo node) {
+    private void scanAndAccept(AccessibilityNodeInfo node) {
         if (node == null) return;
-        
+
         if (node.getText() != null) {
             String text = node.getText().toString().toLowerCase();
-            // यहाँ हम Accept बटन के कीवर्ड्स चेक कर रहे हैं
-            if ((text.contains("accept") || text.contains("स्वीकार") || text.contains("pick")) && node.isClickable()) {
-                node.performAction(AccessibilityNodeInfo.ACTION_CLICK);
-                Log.d("AutoClicker", "Ride Accepted!");
-                return;
+            
+            // अगर पसंदीदा लोकेशन मैच हो जाती है, तो किराया देखे बिना तुरंत क्लिक करो
+            if (!FilterBridgeModule.savedLocation.isEmpty() && text.contains(FilterBridgeModule.savedLocation)) {
+                if (clickAcceptButton(node)) return;
+            }
+
+            // किराए का नंबर ढूंढना और मिनिमम फेयर से तुलना करना
+            if (text.contains("₹") || text.contains("rs")) {
+                try {
+                    String cleanText = text.replaceAll("[^0-9]", "");
+                    if (!cleanText.isEmpty()) {
+                        int fare = Integer.parseInt(cleanText);
+                        if (fare >= FilterBridgeModule.savedMinFare) {
+                            if (clickAcceptButton(node)) return;
+                        }
+                    }
+                } catch (Exception e) {}
             }
         }
-        
+
         for (int i = 0; i < node.getChildCount(); i++) {
-            findAndClickAccept(node.getChild());
+            scanAndAccept(node.getChild());
         }
+    }
+
+    private boolean clickAcceptButton(AccessibilityNodeInfo node) {
+        AccessibilityNodeInfo current = node;
+        while (current != null) {
+            CharSequence nodeText = current.getText();
+            if (nodeText != null) {
+                String t = nodeText.toString().toLowerCase();
+                if ((t.contains("accept") || t.contains("स्वीकार") || t.contains("pick") || t.contains("slide")) && current.isClickable()) {
+                    current.performAction(AccessibilityNodeInfo.ACTION_CLICK);
+                    Log.d("AutoClicker", "Ride Accepted Successfully!");
+                    return true;
+                }
+            }
+            current = current.getParent();
+        }
+        return false;
     }
 
     @Override
     public void onInterrupt() {}
 }`;
-      
-      // फाइलों को सेव करना
+
+      // फाइलों को सही जगह सेव करना
       fs.writeFileSync(path.join(resXmlPath, 'accessibility_service_config.xml'), xmlContent);
-      fs.writeFileSync(path.join(javaPath, 'AutoClickService.java'), javaContent);
+      fs.writeFileSync(path.join(javaPath, 'FilterBridgeModule.java'), bridgeModuleContent);
+      fs.writeFileSync(path.join(javaPath, 'FilterBridgePackage.java'), bridgePackageContent);
+      fs.writeFileSync(path.join(javaPath, 'AutoClickService.java'), serviceContent);
       
       return config;
     }
-  ]);
-
-  return config;
+  });
 };
