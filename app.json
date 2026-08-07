@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "Rider Accept Pro",
+    "name": "Rider Accept",
     "slug": "rider-accept-pro",
     "version": "1.0.0",
     "orientation": "portrait",
@@ -11,13 +11,15 @@
     },
     "android": {
       "package": "com.rider.acceptpro",
+      "jsEngine": "hermes",
       "permissions": [
         "INTERNET",
         "SYSTEM_ALERT_WINDOW",
         "BIND_ACCESSIBILITY_SERVICE",
         "REQUEST_IGNORE_BATTERY_OPTIMIZATIONS",
         "BIND_NOTIFICATION_LISTENER_SERVICE",
-        "VIBRATE"
+        "VIBRATE",
+        "QUERY_ALL_PACKAGES"
       ]
     },
     "plugins": [
