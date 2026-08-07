@@ -34,9 +34,9 @@ export default function App() {
 
   const [perms, setPerms] = useState({ accessibility: false, overlay: false, battery: false, notifications: false });
 
-  // 🚀 FIX 1: Rapido Captain का असली पैकेज नाम (com.rapido.rider)
+  // 🚀 FIX: Ola का असली पैकेज नाम (com.olacabs.oladriver)
   const [appsStatus, setAppsStatus] = useState([
-    { id: 'ola', name: 'Ola', desc: 'Cab / Auto', pkg: 'com.olacabs.partner', installed: false, status: false },
+    { id: 'ola', name: 'Ola', desc: 'Cab / Auto', pkg: 'com.olacabs.oladriver', installed: false, status: false },
     { id: 'uber', name: 'Uber', desc: 'Cab / Moto', pkg: 'com.ubercab.driver', installed: false, status: false },
     { id: 'rapido', name: 'Rapido', desc: 'Bike taxi', pkg: 'com.rapido.rider', installed: false, status: false },
     { id: 'namma', name: 'Namma Yatri', desc: 'Auto / Taxi', pkg: 'in.juspay.nammayatripartner', installed: false, status: false },
@@ -237,7 +237,6 @@ export default function App() {
     if (FilterBridge && FilterBridge.setServiceStatus) FilterBridge.setServiceStatus(val);
   };
 
-  // 🚀 FIX 2: क्रैश रोकने वाला सेफ़्टी गार्ड
   const toggleAppStatus = (index) => {
     const newApps = [...appsStatus];
     if (!newApps[index].installed) return; 
@@ -245,6 +244,7 @@ export default function App() {
     newApps[index].status = !newApps[index].status;
     setAppsStatus(newApps);
     
+    // 🚀 जावा को कमांड भेजना
     if (FilterBridge && FilterBridge.updateAppStatus) {
       try {
          FilterBridge.updateAppStatus(newApps[index].id, newApps[index].status);
