@@ -13,8 +13,9 @@ module.exports = function withAndroidAutomator(config) {
         manifest.manifest.queries[0].package = [];
     }
 
+    // 🚀 FIX: Ola का सही नाम यहाँ भी अपडेट कर दिया गया
     const packagesToQuery = [
-        "com.olacabs.partner", "com.ubercab.driver", "com.rapido.rider",
+        "com.olacabs.oladriver", "com.ubercab.driver", "com.rapido.rider",
         "in.juspay.nammayatripartner", "sinet.startup.inDriver", "com.blusmart.driver"
     ];
 
@@ -75,12 +76,16 @@ import android.content.Intent;
 import android.net.Uri;
 import android.provider.Settings;
 import android.util.Log;
+import java.util.HashMap;
 
 public class FilterBridgeModule extends ReactContextBaseJavaModule {
     public static int savedMinFare = 0;
     public static String savedLocation = "";
     public static boolean isServiceRunning = false;
     private static ReactApplicationContext reactContext; 
+    
+    // 🚀 नया फिक्स: अब ऐप का Allowed/Paused स्टेटस यहाँ सेव होगा
+    public static HashMap<String, Boolean> allowedApps = new HashMap<>();
 
     public FilterBridgeModule(ReactApplicationContext context) {
         super(context);
@@ -101,10 +106,10 @@ public class FilterBridgeModule extends ReactContextBaseJavaModule {
         isServiceRunning = status;
     }
 
-    // 🚀 FIX 3: यह मेथड मिसिंग था जिसकी वजह से ऐप क्रैश हो रहा था!
+    // 🚀 अब यह बटन सच में काम करेगा!
     @ReactMethod
     public void updateAppStatus(String appId, boolean status) {
-        Log.d("FilterBridge", "App status updated: " + appId + " -> " + status);
+        allowedApps.put(appId, status);
     }
 
     @ReactMethod
@@ -183,6 +188,27 @@ public class AutoClickService extends AccessibilityService {
     @Override
     public void onAccessibilityEvent(AccessibilityEvent event) {
         if (!FilterBridgeModule.isServiceRunning) return;
+        
+        // 🚀 नया फिक्स: ऑटो-क्लिकर अब चेक करेगा कि ऐप Allowed है या Paused
+        CharSequence pkgNameSeq = event.getPackageName();
+        if (pkgNameSeq != null) {
+            String pkg = pkgNameSeq.toString();
+            String currentAppId = "";
+            if (pkg.contains("oladriver")) currentAppId = "ola";
+            else if (pkg.contains("ubercab.driver")) currentAppId = "uber";
+            else if (pkg.contains("rapido.rider")) currentAppId = "rapido";
+            else if (pkg.contains("nammayatripartner")) currentAppId = "namma";
+            else if (pkg.contains("inDriver")) currentAppId = "indrive";
+            else if (pkg.contains("blusmart.driver")) currentAppId = "blusmart";
+            
+            if (!currentAppId.isEmpty()) {
+                Boolean isAllowed = FilterBridgeModule.allowedApps.get(currentAppId);
+                // अगर तुमने बटन से ऐप को Allow नहीं किया है (यानी वो Paused है), 
+                // तो बॉट तुरंत वापस लौट जाएगा और कुछ नहीं करेगा!
+                if (isAllowed == null || !isAllowed) return; 
+            }
+        }
+
         AccessibilityNodeInfo rootNode = getRootInActiveWindow();
         if (rootNode != null) {
             detectedFare = 0;
