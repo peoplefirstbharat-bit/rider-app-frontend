@@ -1,9 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, TextInput, TouchableOpacity, StyleSheet, StatusBar, Alert, ActivityIndicator, ScrollView, Switch, Image, Linking, Platform, NativeModules, AppState } from 'react-native';
+import { View, Text, TextInput, TouchableOpacity, StyleSheet, StatusBar, Alert, ActivityIndicator, ScrollView, Switch, Image, Linking, Platform, NativeModules, AppState, DeviceEventEmitter } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import DeviceInfo from 'react-native-device-info'; 
+import DeviceInfo from 'react-native-device-info';
 
-// ⚠️ यहाँ अपना असली बैकएंड URL डालें 
+// ⚠️ तुम्हारा लाइव सर्वर URL
 const BACKEND_URL = "https://ride-auto-backend.onrender.com";
 const { FilterBridge } = NativeModules;
 
@@ -24,15 +24,20 @@ export default function App() {
   const [preferredLocation, setPreferredLocation] = useState('');
   const [serviceOn, setServiceOn] = useState(false);
 
-  const [paymentInfo, setPaymentInfo] = useState({ upiId: 'लोड हो रहा है...', upiNumber: '...', qrUrl: '' });
+  // 🚀 LIVE HISTORY STATS
+  const [historyStats, setHistoryStats] = useState({ detected: 0, accepted: 0, value: 0 });
+  const [recentRides, setRecentRides] = useState([]);
+
+  // PAYMENT & PLANS
+  const [paymentInfo, setPaymentInfo] = useState({ upiId: 'jdtrading845-1@oksbi' }); // Default UPI
   const [plansList, setPlansList] = useState([]); 
   const [utr, setUtr] = useState('');
-  const [selectedPlanDays, setSelectedPlanDays] = useState(7);
-  const [planAmount, setPlanAmount] = useState(39);
+  const [selectedPlanDays, setSelectedPlanDays] = useState(1);
+  const [planAmount, setPlanAmount] = useState(10);
 
   const [perms, setPerms] = useState({ accessibility: false, overlay: false, battery: false, notifications: false });
 
-  // 🚀 Apps List with Package Names for Detection
+  // 🚀 APPS STATUS FOR DETECTION
   const [appsStatus, setAppsStatus] = useState([
     { id: 'ola', name: 'Ola', desc: 'Cab / Auto', pkg: 'com.olacabs.driver', installed: false, status: false },
     { id: 'uber', name: 'Uber', desc: 'Cab / Moto', pkg: 'com.ubercab.driver', installed: false, status: false },
@@ -41,6 +46,21 @@ export default function App() {
     { id: 'indrive', name: 'inDrive', desc: 'Ride sharing', pkg: 'sinet.startup.inDriver', installed: false, status: false },
     { id: 'blusmart', name: 'BluSmart', desc: 'EV cab', pkg: 'com.blusmart.driver', installed: false, status: false },
   ]);
+
+  // 🚀 1. LISTENING TO JAVA ENGINE (LIVE HISTORY)
+  useEffect(() => {
+    const rideListener = DeviceEventEmitter.addListener('RideAccepted', (event) => {
+      const fare = event.fare || 0;
+      setHistoryStats(prev => ({
+        detected: prev.detected + 1,
+        accepted: prev.accepted + 1,
+        value: prev.value + fare
+      }));
+      setRecentRides(prev => [{ id: Date.now(), fare, time: new Date().toLocaleTimeString() }, ...prev]);
+    });
+
+    return () => rideListener.remove();
+  }, []);
 
   useEffect(() => {
     checkLoginStatus();
@@ -58,7 +78,7 @@ export default function App() {
     return () => subscription.remove();
   }, [isLoggedIn, phone]);
 
-  // 🚀 Native Bridge App Detection Logic
+  // 🚀 2. NATIVE APP DETECTION (Missing/Allowed Fix)
   const checkInstalledApps = async () => {
     if (!FilterBridge || !FilterBridge.checkAppInstalled) return;
     
@@ -86,7 +106,7 @@ export default function App() {
       if (!activeStatus && serviceOn) {
         setServiceOn(false);
         if (FilterBridge) FilterBridge.setServiceStatus(false);
-        Alert.alert('प्लान समाप्त', 'आपका प्लान या फ्री ट्रायल ख़त्म हो गया है। कृपया रीचार्ज करें।');
+        Alert.alert('Plan Expired', 'आपका प्लान ख़त्म हो गया है। कृपया रीचार्ज करें।');
       }
     } catch (error) {}
   };
@@ -118,6 +138,13 @@ export default function App() {
           setPlansList(data.data); 
           setSelectedPlanDays(data.data[0].days);
           setPlanAmount(data.data[0].price);
+        } else {
+          // Fallback Plans for Demo
+          setPlansList([
+            { name: 'Daily Pass', days: 1, price: 10, description: '1 दिन के लिए सभी फीचर्स अनलॉक' },
+            { name: 'Weekly Pass', days: 7, price: 50, description: '7 दिनों के लिए गॉड-मोड' },
+            { name: 'Monthly Pass', days: 30, price: 200, description: '30 दिनों के लिए अनलिमिटेड एक्सेस' }
+          ]);
         }
       }).catch(() => {});
   };
@@ -126,7 +153,7 @@ export default function App() {
     if (showPayment) {
       fetch(`${BACKEND_URL}/api/payment-info`)
         .then(res => res.json())
-        .then(data => { if (data.success) setPaymentInfo(data.data); })
+        .then(data => { if (data.success && data.data.upiId) setPaymentInfo(data.data); })
         .catch(() => {});
     }
   }, [showPayment]);
@@ -182,13 +209,13 @@ export default function App() {
         await AsyncStorage.setItem('min_fare', minFare);
         await AsyncStorage.setItem('pref_loc', preferredLocation);
         if (FilterBridge) FilterBridge.saveFilters(Number(minFare) || 0, preferredLocation || "");
-        Alert.alert('Saved', 'Filters updated!');
+        Alert.alert('Saved', 'Filters updated successfully!');
       }
     } catch (error) { Alert.alert('Error', 'Save failed'); }
   };
 
   const sendPaymentRequest = async () => {
-    if (!utr || utr.length < 6) return Alert.alert('Error', 'Invalid UTR');
+    if (!utr || utr.length < 6) return Alert.alert('Error', 'Invalid UTR Number');
     setLoading(true);
     try {
       const response = await fetch(`${BACKEND_URL}/api/payment-request`, {
@@ -196,13 +223,12 @@ export default function App() {
         body: JSON.stringify({ phone, utr, planDays: selectedPlanDays, amount: planAmount })
       });
       const data = await response.json();
-      if (data.success) { Alert.alert('Success', 'Request sent to Admin!'); setShowPayment(false); setUtr(''); } 
+      if (data.success) { Alert.alert('Success', 'Request sent for Admin approval!'); setShowPayment(false); setUtr(''); } 
       else Alert.alert('Error', data.message);
     } catch (error) { Alert.alert('Error', 'Request failed'); }
     setLoading(false);
   };
 
-  // 🚀 Native Battery Fix implemented here
   const requestPerm = (type) => {
     if (Platform.OS !== 'android') return;
     try {
@@ -221,8 +247,8 @@ export default function App() {
   };
 
   const toggleServiceControl = (val) => {
-    if (!isSubActive) return Alert.alert('Plan Inactive', 'Recharge to start.');
-    if (val && (!perms.accessibility || !perms.overlay)) return Alert.alert('Permissions Required', 'Enable overlay and accessibility from Permissions below!');
+    if (!isSubActive) return Alert.alert('Plan Inactive', 'Please activate a plan first.');
+    if (val && (!perms.accessibility || !perms.overlay)) return Alert.alert('Permissions Required', 'Enable Overlay & Accessibility from Settings!');
     setServiceOn(val);
     if (FilterBridge) FilterBridge.setServiceStatus(val);
   };
@@ -269,7 +295,10 @@ export default function App() {
     );
   }
 
-  // 💸 Payment View Override (Restored with Full QR Logic)
+  // 🚀 3. AUTO QR GENERATOR LOGIC
+  const upiString = `upi://pay?pa=${paymentInfo.upiId}&pn=RiderAccept&am=${planAmount}&cu=INR`;
+  const autoQrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=${encodeURIComponent(upiString)}&margin=10`;
+
   if (showPayment) {
     return (
       <View style={styles.container}>
@@ -279,23 +308,21 @@ export default function App() {
           <Text style={{color: '#aaa', marginBottom: 20}}>Choose a plan, pay securely, and enter UTR.</Text>
           
           <View style={styles.planContainer}>
-            {plansList.length > 0 ? plansList.map((plan, i) => (
+            {plansList.map((plan, i) => (
               <TouchableOpacity key={i} style={[styles.planRow, selectedPlanDays === plan.days && styles.planRowActive]} onPress={() => {setSelectedPlanDays(plan.days); setPlanAmount(plan.price);}}>
                 <View>
                   <Text style={{color: selectedPlanDays === plan.days ? '#000' : '#fff', fontSize: 16, fontWeight: 'bold'}}>{plan.name}</Text>
-                  <Text style={{color: selectedPlanDays === plan.days ? '#333' : '#aaa', fontSize: 12}}>{plan.description}</Text>
+                  <Text style={{color: selectedPlanDays === plan.days ? '#333' : '#aaa', fontSize: 12, marginTop: 4}}>{plan.description}</Text>
                 </View>
-                <Text style={{color: selectedPlanDays === plan.days ? '#000' : '#FFD700', fontSize: 16, fontWeight: 'bold'}}>Rs {plan.price}</Text>
+                <Text style={{color: selectedPlanDays === plan.days ? '#000' : '#FFD700', fontSize: 18, fontWeight: '900'}}>Rs {plan.price}</Text>
               </TouchableOpacity>
-            )) : (
-              <Text style={{color: '#aaa', textAlign: 'center', marginBottom: 15}}>Loading Plans...</Text>
-            )}
+            ))}
           </View>
 
           <View style={styles.qrBox}>
-            {paymentInfo.qrUrl ? <Image source={{uri: paymentInfo.qrUrl}} style={{width: 150, height: 150, marginBottom: 10}}/> : <Text style={{color:'#fff', marginBottom:10}}>QR Loading...</Text>}
+            <Image source={{ uri: autoQrUrl }} style={{ width: 180, height: 180, marginBottom: 15, borderRadius: 10 }}/>
             <Text style={{color: '#00E676', fontWeight: 'bold', fontSize: 16}}>{paymentInfo.upiId}</Text>
-            <Text style={{color: '#aaa', fontSize: 14, marginTop: 5}}>Amount: Rs {planAmount}</Text>
+            <Text style={{color: '#aaa', fontSize: 14, marginTop: 5}}>Amount to pay: Rs {planAmount}</Text>
           </View>
 
           <TextInput style={styles.input} placeholder="Enter 12-Digit UTR Number" placeholderTextColor="#888" keyboardType="numeric" value={utr} onChangeText={setUtr} />
@@ -314,10 +341,9 @@ export default function App() {
     <View style={styles.container}>
       <StatusBar barStyle="light-content" backgroundColor="#0B1319" />
       
-      {/* Top Header */}
       <View style={styles.mainHeader}>
         <View style={{flexDirection: 'row', alignItems: 'center'}}>
-           <Image source={require('./assets/logo.png')} style={{width: 30, height: 30, marginRight: 10}} resizeMode="contain" />
+           <Image source={require('./assets/logo.png')} style={{width: 32, height: 32, marginRight: 10}} resizeMode="contain" />
            <View>
              <Text style={[styles.authLogoTxt, {fontSize: 20}]}>Rider Accept</Text>
              <Text style={[styles.authSubTxt, {fontSize: 12}]}>Premium driver console</Text>
@@ -328,19 +354,19 @@ export default function App() {
 
       <ScrollView style={{flex: 1}} contentContainerStyle={{paddingBottom: 80}}>
         
-        {/* DASHBOARD TAB */}
+        {/* DASHBOARD */}
         {activeTab === 'Dashboard' && (
           <View style={styles.tabContent}>
             
             <View style={[styles.profitCard, {borderColor: serviceOn ? '#00E676' : '#1E2A32'}]}>
               <Text style={{color: '#00E676', fontSize: 12, fontWeight: 'bold'}}>LIVE DRIVER CONSOLE</Text>
-              <Text style={{color: '#fff', fontSize: 32, fontWeight: 'bold', marginVertical: 5}}>Profit Rs 0</Text>
-              <Text style={{color: '#aaa', fontSize: 12, marginBottom: 15}}>0 accepted from 0 detected orders today</Text>
+              <Text style={{color: '#fff', fontSize: 32, fontWeight: 'bold', marginVertical: 5}}>Profit Rs {historyStats.value}</Text>
+              <Text style={{color: '#aaa', fontSize: 12, marginBottom: 15}}>{historyStats.accepted} accepted from {historyStats.detected} detected orders today</Text>
               
               <View style={{flexDirection: 'row', gap: 10}}>
                 <View style={styles.pillBox}><Text style={styles.pillTextTop}>STATUS</Text><Text style={styles.pillTextBottom}>{serviceOn ? 'Active' : 'Paused'}</Text></View>
-                <View style={styles.pillBox}><Text style={styles.pillTextTop}>VALUE</Text><Text style={styles.pillTextBottom}>Rs 0</Text></View>
-                <View style={styles.pillBox}><Text style={styles.pillTextTop}>RATE</Text><Text style={styles.pillTextBottom}>0%</Text></View>
+                <View style={styles.pillBox}><Text style={styles.pillTextTop}>VALUE</Text><Text style={styles.pillTextBottom}>Rs {historyStats.value}</Text></View>
+                <View style={styles.pillBox}><Text style={styles.pillTextTop}>RATE</Text><Text style={styles.pillTextBottom}>{historyStats.detected > 0 ? Math.round((historyStats.accepted/historyStats.detected)*100) : 0}%</Text></View>
               </View>
 
               <TouchableOpacity style={[styles.toggleBtn, {backgroundColor: serviceOn ? '#00E676' : '#333'}]} onPress={() => toggleServiceControl(!serviceOn)}>
@@ -382,7 +408,6 @@ export default function App() {
               <TouchableOpacity style={[styles.primaryBtn, {marginTop: 10}]} onPress={saveFilters}><Text style={styles.primaryBtnTxt}>SAVE FILTERS</Text></TouchableOpacity>
             </View>
 
-            {/* 🚀 RESTORED: Full Permissions Section in Dashboard */}
             <View style={styles.sectionCard}>
               <Text style={styles.sectionTitle}>Permissions Settings</Text>
               {[
@@ -406,30 +431,43 @@ export default function App() {
           </View>
         )}
 
-        {/* HISTORY TAB */}
+        {/* 🚀 LIVE HISTORY TAB */}
         {activeTab === 'History' && (
           <View style={styles.tabContent}>
              <View style={styles.historyCard}>
                 <Text style={{color: '#00E676', fontSize: 12, fontWeight: 'bold'}}>TODAY'S PERFORMANCE</Text>
                 <Text style={{color: '#fff', fontSize: 26, fontWeight: 'bold', marginVertical: 5}}>Ride history</Text>
-                <Text style={{color: '#aaa', fontSize: 12, marginBottom: 20}}>0 accepted | 0 rejected | 0 skipped</Text>
+                <Text style={{color: '#aaa', fontSize: 12, marginBottom: 20}}>{historyStats.accepted} accepted | 0 rejected | 0 skipped</Text>
                 
                 <View style={{flexDirection: 'row', justifyContent: 'space-between'}}>
-                  <View style={styles.historyStatBox}><Text style={{color: '#00BFFF', fontSize: 24, fontWeight: 'bold'}}>0</Text><Text style={{color: '#aaa', fontSize: 11}}>Detected</Text></View>
-                  <View style={styles.historyStatBox}><Text style={{color: '#00E676', fontSize: 24, fontWeight: 'bold'}}>0</Text><Text style={{color: '#aaa', fontSize: 11}}>Accepted</Text></View>
-                  <View style={styles.historyStatBox}><Text style={{color: '#FFD700', fontSize: 24, fontWeight: 'bold'}}>0</Text><Text style={{color: '#aaa', fontSize: 11}}>Value</Text></View>
+                  <View style={styles.historyStatBox}><Text style={{color: '#00BFFF', fontSize: 24, fontWeight: 'bold'}}>{historyStats.detected}</Text><Text style={{color: '#aaa', fontSize: 11}}>Detected</Text></View>
+                  <View style={styles.historyStatBox}><Text style={{color: '#00E676', fontSize: 24, fontWeight: 'bold'}}>{historyStats.accepted}</Text><Text style={{color: '#aaa', fontSize: 11}}>Accepted</Text></View>
+                  <View style={styles.historyStatBox}><Text style={{color: '#FFD700', fontSize: 24, fontWeight: 'bold'}}>Rs {historyStats.value}</Text><Text style={{color: '#aaa', fontSize: 11}}>Value</Text></View>
                 </View>
              </View>
 
              <View style={{marginTop: 20}}>
                 <Text style={{color: '#00E676', fontSize: 18, fontWeight: 'bold', marginBottom: 10}}>Ride Timeline</Text>
-                <View style={styles.timelineBox}>
-                   <Text style={{color: '#fff', fontSize: 18, fontWeight: 'bold', marginBottom: 5}}>No failed rides</Text>
-                   <Text style={{color: '#aaa', fontSize: 12, textAlign: 'center', marginBottom: 20}}>New detections will appear here with fare, route, time, and decision status.</Text>
-                   <TouchableOpacity style={styles.cyanBtn} onPress={() => setActiveTab('Dashboard')}>
-                      <Text style={styles.cyanBtnTxt}>OPEN DASHBOARD</Text>
-                   </TouchableOpacity>
-                </View>
+                
+                {recentRides.length > 0 ? (
+                  recentRides.map((ride, idx) => (
+                    <View key={idx} style={{backgroundColor: '#1E2A32', padding: 15, borderRadius: 10, marginBottom: 10, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center'}}>
+                      <View>
+                        <Text style={{color: '#fff', fontSize: 16, fontWeight: 'bold'}}>Ride Accepted</Text>
+                        <Text style={{color: '#aaa', fontSize: 12}}>{ride.time}</Text>
+                      </View>
+                      <Text style={{color: '#00E676', fontSize: 18, fontWeight: 'bold'}}>+ Rs {ride.fare}</Text>
+                    </View>
+                  ))
+                ) : (
+                  <View style={styles.timelineBox}>
+                     <Text style={{color: '#fff', fontSize: 18, fontWeight: 'bold', marginBottom: 5}}>No rides yet</Text>
+                     <Text style={{color: '#aaa', fontSize: 12, textAlign: 'center', marginBottom: 20}}>New detections will appear here automatically.</Text>
+                     <TouchableOpacity style={styles.cyanBtn} onPress={() => setActiveTab('Dashboard')}>
+                        <Text style={styles.cyanBtnTxt}>OPEN DASHBOARD</Text>
+                     </TouchableOpacity>
+                  </View>
+                )}
              </View>
           </View>
         )}
@@ -573,7 +611,7 @@ const styles = StyleSheet.create({
   planRing: { width: 60, height: 60, borderRadius: 30, borderWidth: 4, borderColor: '#1E2A32', borderTopColor: '#00E676', justifyContent: 'center', alignItems: 'center' },
   
   planContainer: { marginBottom: 20 },
-  planRow: { backgroundColor: '#1E2A32', padding: 20, borderRadius: 10, marginBottom: 10 },
+  planRow: { backgroundColor: '#1E2A32', padding: 20, borderRadius: 10, marginBottom: 10, borderWidth: 1, borderColor: 'transparent' },
   planRowActive: { backgroundColor: '#FFD700' },
   qrBox: { backgroundColor: '#1E2A32', padding: 20, borderRadius: 15, alignItems: 'center', marginBottom: 20, borderWidth: 1, borderColor: '#2A3942' },
   
