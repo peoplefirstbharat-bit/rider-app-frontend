@@ -49,13 +49,18 @@ module.exports = function withAndroidAutomator(config) {
     android:accessibilityFlags="flagDefault|flagIncludeNotImportantViews|flagRetrieveInteractiveWindows|flagReportViewIds"
     android:canRetrieveWindowContent="true"
     android:canPerformGestures="true" 
-    android:notificationTimeout="0" />`; // Timeout 0 for Instant Reaction
+    android:notificationTimeout="0" />`; 
       
-      // --- Bridge Module ---
+      // --- Bridge Module (🔥 UPDATED WITH APP DETECTION & BATTERY FIX) ---
       const bridgeModuleContent = `package com.rider.acceptpro;
 import com.facebook.react.bridge.ReactApplicationContext;
 import com.facebook.react.bridge.ReactContextBaseJavaModule;
 import com.facebook.react.bridge.ReactMethod;
+import com.facebook.react.bridge.Promise;
+import android.content.pm.PackageManager;
+import android.content.Intent;
+import android.net.Uri;
+import android.provider.Settings;
 
 public class FilterBridgeModule extends ReactContextBaseJavaModule {
     public static int savedMinFare = 0;
@@ -82,6 +87,34 @@ public class FilterBridgeModule extends ReactContextBaseJavaModule {
 
     @ReactMethod
     public void updateAppStatus(String appId, boolean status) {}
+
+    // 🚀 NEW: Check if an app is installed
+    @ReactMethod
+    public void checkAppInstalled(String packageName, Promise promise) {
+        try {
+            PackageManager pm = getReactApplicationContext().getPackageManager();
+            pm.getPackageInfo(packageName, 0);
+            promise.resolve(true); // App is installed
+        } catch (PackageManager.NameNotFoundException e) {
+            promise.resolve(false); // App is missing
+        }
+    }
+
+    // 🚀 NEW: Direct Battery Optimization Fix
+    @ReactMethod
+    public void requestBatteryOptimization() {
+        try {
+            Intent intent = new Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS);
+            intent.setData(Uri.parse("package:" + getReactApplicationContext().getPackageName()));
+            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            getReactApplicationContext().startActivity(intent);
+        } catch (Exception e) {
+            // Fallback
+            Intent intent = new Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS);
+            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            getReactApplicationContext().startActivity(intent);
+        }
+    }
 }`;
 
       // --- Bridge Package ---
@@ -108,7 +141,7 @@ public class FilterBridgePackage implements ReactPackage {
     }
 }`;
 
-      // --- Main AutoClickService (The Superfast Robot Engine) ---
+      // --- Main AutoClickService (The Superfast Robot Engine - UNTOUCHED) ---
       const serviceContent = `package com.rider.acceptpro;
 import android.accessibilityservice.AccessibilityService;
 import android.accessibilityservice.GestureDescription;
@@ -164,7 +197,6 @@ public class AutoClickService extends AccessibilityService {
     }
 
     private boolean executeFastAction(AccessibilityNodeInfo node, String detectedText) {
-        // 🔥 HYPER-FAST COOLDOWN: 50 मिलीसेकंड (ताकि लूप में फँसकर फोन क्रैश न हो, लेकिन स्पीड 100% रहे)
         if (System.currentTimeMillis() - lastActionTime < 50) return false;
 
         AccessibilityNodeInfo current = node;
@@ -173,14 +205,12 @@ public class AutoClickService extends AccessibilityService {
             if (nodeText != null) {
                 String t = nodeText.toString().toLowerCase();
 
-                // 🚀 SUPERFAST SWIPE (Uber / Rapido / inDrive)
                 if (t.contains("slide") || t.contains("swipe") || t.contains("स्लाइड")) {
                     performInstantSwipe();
                     lastActionTime = System.currentTimeMillis();
                     return true;
                 }
 
-                // 🚀 SUPERFAST CLICK (Ola / Namma Yatri)
                 if ((t.contains("accept") || t.contains("स्वीकार") || t.contains("pick")) && current.isClickable()) {
                     current.performAction(AccessibilityNodeInfo.ACTION_CLICK);
                     Log.d("AutoClickerPro", "Ride Captured in Milliseconds!");
@@ -195,10 +225,9 @@ public class AutoClickService extends AccessibilityService {
 
     private void performInstantSwipe() {
         Path path = new Path();
-        path.moveTo(150, 1500); // Swipe Start Point
-        path.lineTo(900, 1500); // Swipe End Point
+        path.moveTo(150, 1500); 
+        path.lineTo(900, 1500); 
         
-        // Duration = 100ms (Very fast swipe, almost instant)
         GestureDescription.Builder builder = new GestureDescription.Builder();
         builder.addStroke(new GestureDescription.StrokeDescription(path, 0, 100));
         dispatchGesture(builder.build(), null, null);
