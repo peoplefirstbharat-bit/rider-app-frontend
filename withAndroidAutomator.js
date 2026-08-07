@@ -3,11 +3,21 @@ const fs = require('fs');
 const path = require('path');
 
 module.exports = function withAndroidAutomator(config) {
-  // 1. AndroidManifest.xml में सर्विस जोड़ना
+  
+  // 1. AndroidManifest.xml में ज़बरदस्ती परमिशन और सर्विस जोड़ना
   config = withAndroidManifest(config, (config) => {
     const manifest = config.modResults;
-    const app = manifest.manifest.application[0];
+    
+    // 🔥 FORCE INJECT: Android 11+ App Detection Permission
+    if (!manifest.manifest['uses-permission']) manifest.manifest['uses-permission'] = [];
+    const hasQueryPerm = manifest.manifest['uses-permission'].some(
+      (p) => p.$['android:name'] === 'android.permission.QUERY_ALL_PACKAGES'
+    );
+    if (!hasQueryPerm) {
+      manifest.manifest['uses-permission'].push({ '$': { 'android:name': 'android.permission.QUERY_ALL_PACKAGES' } });
+    }
 
+    const app = manifest.manifest.application[0];
     if (!app.service) app.service = [];
     
     app.service.push({
@@ -16,21 +26,14 @@ module.exports = function withAndroidAutomator(config) {
         'android:permission': 'android.permission.BIND_ACCESSIBILITY_SERVICE',
         'android:exported': 'true'
       },
-      'intent-filter': [{
-        'action': [{ '$': { 'android:name': 'android.accessibilityservice.AccessibilityService' } }]
-      }],
-      'meta-data': [{
-        '$': {
-          'android:name': 'android.accessibilityservice',
-          'android:resource': '@xml/accessibility_service_config'
-        }
-      }]
+      'intent-filter': [{ 'action': [{ '$': { 'android:name': 'android.accessibilityservice.AccessibilityService' } }] }],
+      'meta-data': [{ '$': { 'android:name': 'android.accessibilityservice', 'android:resource': '@xml/accessibility_service_config' } }]
     });
 
     return config;
   });
 
-  // 2. बैकग्राउंड में सारे नेटिव जावा और XML इंजन जनरेट करना
+  // 2. बैकग्राउंड में नेटिव जावा इंजन जनरेट करना
   config = withDangerousMod(config, [
     'android',
     (config) => {
@@ -41,7 +44,7 @@ module.exports = function withAndroidAutomator(config) {
       fs.mkdirSync(resXmlPath, { recursive: true });
       fs.mkdirSync(javaPath, { recursive: true });
       
-      // --- XML Config (Superfast Feedback) ---
+      // --- XML Config ---
       const xmlContent = `<?xml version="1.0" encoding="utf-8"?>
 <accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
     android:accessibilityEventTypes="typeWindowContentChanged|typeWindowStateChanged"
@@ -51,12 +54,15 @@ module.exports = function withAndroidAutomator(config) {
     android:canPerformGestures="true" 
     android:notificationTimeout="0" />`; 
       
-      // --- Bridge Module (🔥 UPDATED WITH APP DETECTION & BATTERY FIX) ---
+      // --- Bridge Module (🔥 UPDATED WITH LIVE EVENT EMITTER) ---
       const bridgeModuleContent = `package com.rider.acceptpro;
 import com.facebook.react.bridge.ReactApplicationContext;
 import com.facebook.react.bridge.ReactContextBaseJavaModule;
 import com.facebook.react.bridge.ReactMethod;
 import com.facebook.react.bridge.Promise;
+import com.facebook.react.bridge.WritableMap;
+import com.facebook.react.bridge.Arguments;
+import com.facebook.react.modules.core.DeviceEventManagerModule;
 import android.content.pm.PackageManager;
 import android.content.Intent;
 import android.net.Uri;
@@ -66,9 +72,11 @@ public class FilterBridgeModule extends ReactContextBaseJavaModule {
     public static int savedMinFare = 0;
     public static String savedLocation = "";
     public static boolean isServiceRunning = false;
+    private static ReactApplicationContext reactContext; 
 
     public FilterBridgeModule(ReactApplicationContext context) {
         super(context);
+        reactContext = context; // React का कांटेक्ट सेव कर लिया
     }
 
     @Override
@@ -86,21 +94,16 @@ public class FilterBridgeModule extends ReactContextBaseJavaModule {
     }
 
     @ReactMethod
-    public void updateAppStatus(String appId, boolean status) {}
-
-    // 🚀 NEW: Check if an app is installed
-    @ReactMethod
     public void checkAppInstalled(String packageName, Promise promise) {
         try {
             PackageManager pm = getReactApplicationContext().getPackageManager();
             pm.getPackageInfo(packageName, 0);
-            promise.resolve(true); // App is installed
+            promise.resolve(true); 
         } catch (PackageManager.NameNotFoundException e) {
-            promise.resolve(false); // App is missing
+            promise.resolve(false); 
         }
     }
 
-    // 🚀 NEW: Direct Battery Optimization Fix
     @ReactMethod
     public void requestBatteryOptimization() {
         try {
@@ -109,10 +112,20 @@ public class FilterBridgeModule extends ReactContextBaseJavaModule {
             intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
             getReactApplicationContext().startActivity(intent);
         } catch (Exception e) {
-            // Fallback
             Intent intent = new Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS);
             intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
             getReactApplicationContext().startActivity(intent);
+        }
+    }
+
+    // 🚀 NEW: यह फंक्शन सर्विस को फ्रंटएंड (History) तक मैसेज भेजने की ताकत देगा
+    public static void emitRideAccepted(int fare) {
+        if (reactContext != null) {
+            WritableMap params = Arguments.createMap();
+            params.putInt("fare", fare);
+            reactContext
+                .getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter.class)
+                .emit("RideAccepted", params);
         }
     }
 }`;
@@ -141,7 +154,7 @@ public class FilterBridgePackage implements ReactPackage {
     }
 }`;
 
-      // --- Main AutoClickService (The Superfast Robot Engine - UNTOUCHED) ---
+      // --- Main AutoClickService (🔥 UPDATED TO SEND SIGNALS TO HISTORY TAB) ---
       const serviceContent = `package com.rider.acceptpro;
 import android.accessibilityservice.AccessibilityService;
 import android.accessibilityservice.GestureDescription;
@@ -149,9 +162,12 @@ import android.graphics.Path;
 import android.view.accessibility.AccessibilityEvent;
 import android.view.accessibility.AccessibilityNodeInfo;
 import android.util.Log;
+import android.os.Handler;
+import android.os.Looper;
 
 public class AutoClickService extends AccessibilityService {
     private long lastActionTime = 0;
+    private int detectedFare = 0;
 
     @Override
     public void onAccessibilityEvent(AccessibilityEvent event) {
@@ -159,6 +175,7 @@ public class AutoClickService extends AccessibilityService {
 
         AccessibilityNodeInfo rootNode = getRootInActiveWindow();
         if (rootNode != null) {
+            detectedFare = 0;
             scanAndAcceptFast(rootNode);
         }
     }
@@ -170,33 +187,31 @@ public class AutoClickService extends AccessibilityService {
         if (textSeq != null) {
             String text = textSeq.toString().toLowerCase();
             
-            // 1. Instant Location Match -> Click/Swipe immediately
             if (!FilterBridgeModule.savedLocation.isEmpty() && text.contains(FilterBridgeModule.savedLocation)) {
-                if (executeFastAction(node, text)) return;
+                if (executeFastAction(node)) return;
             }
 
-            // 2. Instant Fare Match -> Click/Swipe immediately
             if (text.contains("₹") || text.contains("rs")) {
                 try {
                     String cleanText = text.replaceAll("[^0-9]", "");
                     if (!cleanText.isEmpty()) {
                         int fare = Integer.parseInt(cleanText);
+                        detectedFare = fare; // किराया सेव कर लिया
                         if (fare >= FilterBridgeModule.savedMinFare) {
-                            if (executeFastAction(node, text)) return;
+                            if (executeFastAction(node)) return;
                         }
                     }
                 } catch (Exception e) {}
             }
         }
 
-        // Fast DOM Tree Traversal
         int childCount = node.getChildCount();
         for (int i = 0; i < childCount; i++) {
             scanAndAcceptFast(node.getChild(i));
         }
     }
 
-    private boolean executeFastAction(AccessibilityNodeInfo node, String detectedText) {
+    private boolean executeFastAction(AccessibilityNodeInfo node) {
         if (System.currentTimeMillis() - lastActionTime < 50) return false;
 
         AccessibilityNodeInfo current = node;
@@ -208,13 +223,14 @@ public class AutoClickService extends AccessibilityService {
                 if (t.contains("slide") || t.contains("swipe") || t.contains("स्लाइड")) {
                     performInstantSwipe();
                     lastActionTime = System.currentTimeMillis();
+                    reportSuccessToApp();
                     return true;
                 }
 
                 if ((t.contains("accept") || t.contains("स्वीकार") || t.contains("pick")) && current.isClickable()) {
                     current.performAction(AccessibilityNodeInfo.ACTION_CLICK);
-                    Log.d("AutoClickerPro", "Ride Captured in Milliseconds!");
                     lastActionTime = System.currentTimeMillis();
+                    reportSuccessToApp();
                     return true;
                 }
             }
@@ -223,11 +239,17 @@ public class AutoClickService extends AccessibilityService {
         return false;
     }
 
+    // 🚀 NEW: फ्रंटएंड को सिग्नल भेजने वाला ट्रिगर
+    private void reportSuccessToApp() {
+        new Handler(Looper.getMainLooper()).post(() -> {
+            FilterBridgeModule.emitRideAccepted(detectedFare > 0 ? detectedFare : 0);
+        });
+    }
+
     private void performInstantSwipe() {
         Path path = new Path();
         path.moveTo(150, 1500); 
         path.lineTo(900, 1500); 
-        
         GestureDescription.Builder builder = new GestureDescription.Builder();
         builder.addStroke(new GestureDescription.StrokeDescription(path, 0, 100));
         dispatchGesture(builder.build(), null, null);
