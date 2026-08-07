@@ -3,7 +3,8 @@ import { View, Text, TextInput, TouchableOpacity, StyleSheet, StatusBar, Alert, 
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 // ⚠️ यहाँ अपना असली बैकएंड URL डालें 
-const BACKEND_URL = "https://rider-accept-backend.onrender.com"; 
+const BACKEND_URL = "https://ride-auto-backend.onrender.com";
+ 
 
 // जावा इंजन से जुड़ने वाला ब्रिज
 const { FilterBridge } = NativeModules;
