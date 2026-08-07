@@ -8,7 +8,7 @@ module.exports = function withAndroidAutomator(config) {
   config = withAndroidManifest(config, (config) => {
     const manifest = config.modResults;
     
-    // 🔥 FIX 1: Android 11+ के लिए Package Visibility (<queries> टैग)
+    // Android 11+ के लिए Package Visibility (<queries> टैग)
     if (!manifest.manifest.queries) {
         manifest.manifest.queries = [{ package: [] }];
     } else if (!manifest.manifest.queries[0].package) {
@@ -267,17 +267,42 @@ public class AutoClickService extends AccessibilityService {
     }
   ]);
 
-  // 🚀 FIX 2: 100% पक्का लिंकिंग कोड (Expo 50 Kotlin के लिए)
+  // 🚀 FIX 3: अचूक लिंकिंग कोड (100% Foolproof)
   config = withMainApplication(config, (config) => {
     let content = config.modResults.contents;
     
+    // Kotlin (Expo 50+) के लिए
     if (config.modResults.language === 'kt') {
       if (!content.includes('FilterBridgePackage')) {
-        // यह नया Regex बिल्कुल सटीक जगह पर फाइल को लिंक करेगा
-        content = content.replace(
-          /PackageList\(this\)\.packages\.apply\s*\{/,
-          "PackageList(this).packages.apply {\n          add(com.rider.acceptpro.FilterBridgePackage())"
-        );
+        // हम सीधे Expo के डिफ़ॉल्ट कमेंट को टारगेट कर रहे हैं, जो कभी फेल नहीं होगा
+        if (content.includes('// add(MyReactNativePackage())')) {
+            content = content.replace(
+                '// add(MyReactNativePackage())',
+                '// add(MyReactNativePackage())\n          add(com.rider.acceptpro.FilterBridgePackage())'
+            );
+        } else {
+            // बैकअप तरीका अगर कमेंट नहीं मिला
+            content = content.replace(
+                /PackageList\(this\)\.packages\.apply\s*\{/g,
+                'PackageList(this).packages.apply {\n          add(com.rider.acceptpro.FilterBridgePackage())'
+            );
+        }
+      }
+    } 
+    // Java (पुराने वर्ज़न) के लिए
+    else if (config.modResults.language === 'java') {
+      if (!content.includes('FilterBridgePackage')) {
+         if (content.includes('// packages.add(new MyReactNativePackage());')) {
+             content = content.replace(
+                 '// packages.add(new MyReactNativePackage());',
+                 '// packages.add(new MyReactNativePackage());\n          packages.add(new com.rider.acceptpro.FilterBridgePackage());'
+             );
+         } else {
+             content = content.replace(
+                /return packages;/g,
+                'packages.add(new com.rider.acceptpro.FilterBridgePackage());\n      return packages;'
+             );
+         }
       }
     }
     
