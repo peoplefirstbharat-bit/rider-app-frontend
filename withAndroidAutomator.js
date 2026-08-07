@@ -4,36 +4,49 @@ const path = require('path');
 
 module.exports = function withAndroidAutomator(config) {
   
-  // 1. AndroidManifest.xml में ज़बरदस्ती परमिशन और सर्विस जोड़ना (तुम्हारा ओरिजिनल कोड)
+  // 1. AndroidManifest.xml में परमिशन और <queries> जोड़ना
   config = withAndroidManifest(config, (config) => {
     const manifest = config.modResults;
     
-    // 🔥 FORCE INJECT: Android 11+ App Detection Permission
-    if (!manifest.manifest['uses-permission']) manifest.manifest['uses-permission'] = [];
-    const hasQueryPerm = manifest.manifest['uses-permission'].some(
-      (p) => p.$['android:name'] === 'android.permission.QUERY_ALL_PACKAGES'
-    );
-    if (!hasQueryPerm) {
-      manifest.manifest['uses-permission'].push({ '$': { 'android:name': 'android.permission.QUERY_ALL_PACKAGES' } });
+    // 🔥 FIX 1: Android 11+ के लिए Package Visibility (<queries> टैग)
+    if (!manifest.manifest.queries) {
+        manifest.manifest.queries = [{ package: [] }];
+    } else if (!manifest.manifest.queries[0].package) {
+        manifest.manifest.queries[0].package = [];
     }
+
+    const packagesToQuery = [
+        "com.olacabs.partner", "com.ubercab.driver", "com.rapido.passenger.to",
+        "in.juspay.nammayatripartner", "sinet.startup.inDriver", "com.blusmart.driver"
+    ];
+
+    packagesToQuery.forEach(pkg => {
+        const exists = manifest.manifest.queries[0].package.some(p => p.$['android:name'] === pkg);
+        if (!exists) {
+            manifest.manifest.queries[0].package.push({ '$': { 'android:name': pkg } });
+        }
+    });
 
     const app = manifest.manifest.application[0];
     if (!app.service) app.service = [];
     
-    app.service.push({
-      '$': {
-        'android:name': '.AutoClickService',
-        'android:permission': 'android.permission.BIND_ACCESSIBILITY_SERVICE',
-        'android:exported': 'true'
-      },
-      'intent-filter': [{ 'action': [{ '$': { 'android:name': 'android.accessibilityservice.AccessibilityService' } }] }],
-      'meta-data': [{ '$': { 'android:name': 'android.accessibilityservice', 'android:resource': '@xml/accessibility_service_config' } }]
-    });
+    const serviceExists = app.service.some(s => s.$['android:name'] === '.AutoClickService');
+    if (!serviceExists) {
+      app.service.push({
+        '$': {
+          'android:name': '.AutoClickService',
+          'android:permission': 'android.permission.BIND_ACCESSIBILITY_SERVICE',
+          'android:exported': 'true'
+        },
+        'intent-filter': [{ 'action': [{ '$': { 'android:name': 'android.accessibilityservice.AccessibilityService' } }] }],
+        'meta-data': [{ '$': { 'android:name': 'android.accessibilityservice', 'android:resource': '@xml/accessibility_service_config' } }]
+      });
+    }
 
     return config;
   });
 
-  // 2. बैकग्राउंड में नेटिव जावा इंजन जनरेट करना (तुम्हारा ओरिजिनल कोड)
+  // 2. बैकग्राउंड में नेटिव जावा इंजन जनरेट करना
   config = withDangerousMod(config, [
     'android',
     (config) => {
@@ -44,7 +57,6 @@ module.exports = function withAndroidAutomator(config) {
       fs.mkdirSync(resXmlPath, { recursive: true });
       fs.mkdirSync(javaPath, { recursive: true });
       
-      // --- XML Config ---
       const xmlContent = `<?xml version="1.0" encoding="utf-8"?>
 <accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
     android:accessibilityEventTypes="typeWindowContentChanged|typeWindowStateChanged"
@@ -54,7 +66,6 @@ module.exports = function withAndroidAutomator(config) {
     android:canPerformGestures="true" 
     android:notificationTimeout="0" />`; 
       
-      // --- Bridge Module (🔥 UPDATED WITH LIVE EVENT EMITTER) ---
       const bridgeModuleContent = `package com.rider.acceptpro;
 import com.facebook.react.bridge.ReactApplicationContext;
 import com.facebook.react.bridge.ReactContextBaseJavaModule;
@@ -76,7 +87,7 @@ public class FilterBridgeModule extends ReactContextBaseJavaModule {
 
     public FilterBridgeModule(ReactApplicationContext context) {
         super(context);
-        reactContext = context; // React का कांटेक्ट सेव कर लिया
+        reactContext = context;
     }
 
     @Override
@@ -118,7 +129,6 @@ public class FilterBridgeModule extends ReactContextBaseJavaModule {
         }
     }
 
-    // 🚀 NEW: यह फंक्शन सर्विस को फ्रंटएंड (History) तक मैसेज भेजने की ताकत देगा
     public static void emitRideAccepted(int fare) {
         if (reactContext != null) {
             WritableMap params = Arguments.createMap();
@@ -130,7 +140,6 @@ public class FilterBridgeModule extends ReactContextBaseJavaModule {
     }
 }`;
 
-      // --- Bridge Package ---
       const bridgePackageContent = `package com.rider.acceptpro;
 import com.facebook.react.ReactPackage;
 import com.facebook.react.bridge.NativeModule;
@@ -154,7 +163,6 @@ public class FilterBridgePackage implements ReactPackage {
     }
 }`;
 
-      // --- Main AutoClickService (🔥 UPDATED TO SEND SIGNALS TO HISTORY TAB) ---
       const serviceContent = `package com.rider.acceptpro;
 import android.accessibilityservice.AccessibilityService;
 import android.accessibilityservice.GestureDescription;
@@ -172,7 +180,6 @@ public class AutoClickService extends AccessibilityService {
     @Override
     public void onAccessibilityEvent(AccessibilityEvent event) {
         if (!FilterBridgeModule.isServiceRunning) return;
-
         AccessibilityNodeInfo rootNode = getRootInActiveWindow();
         if (rootNode != null) {
             detectedFare = 0;
@@ -182,21 +189,18 @@ public class AutoClickService extends AccessibilityService {
 
     private void scanAndAcceptFast(AccessibilityNodeInfo node) {
         if (node == null) return;
-
         CharSequence textSeq = node.getText();
         if (textSeq != null) {
             String text = textSeq.toString().toLowerCase();
-            
             if (!FilterBridgeModule.savedLocation.isEmpty() && text.contains(FilterBridgeModule.savedLocation)) {
                 if (executeFastAction(node)) return;
             }
-
             if (text.contains("₹") || text.contains("rs")) {
                 try {
                     String cleanText = text.replaceAll("[^0-9]", "");
                     if (!cleanText.isEmpty()) {
                         int fare = Integer.parseInt(cleanText);
-                        detectedFare = fare; // किराया सेव कर लिया
+                        detectedFare = fare; 
                         if (fare >= FilterBridgeModule.savedMinFare) {
                             if (executeFastAction(node)) return;
                         }
@@ -204,7 +208,6 @@ public class AutoClickService extends AccessibilityService {
                 } catch (Exception e) {}
             }
         }
-
         int childCount = node.getChildCount();
         for (int i = 0; i < childCount; i++) {
             scanAndAcceptFast(node.getChild(i));
@@ -213,20 +216,17 @@ public class AutoClickService extends AccessibilityService {
 
     private boolean executeFastAction(AccessibilityNodeInfo node) {
         if (System.currentTimeMillis() - lastActionTime < 50) return false;
-
         AccessibilityNodeInfo current = node;
         while (current != null) {
             CharSequence nodeText = current.getText();
             if (nodeText != null) {
                 String t = nodeText.toString().toLowerCase();
-
                 if (t.contains("slide") || t.contains("swipe") || t.contains("स्लाइड")) {
                     performInstantSwipe();
                     lastActionTime = System.currentTimeMillis();
                     reportSuccessToApp();
                     return true;
                 }
-
                 if ((t.contains("accept") || t.contains("स्वीकार") || t.contains("pick")) && current.isClickable()) {
                     current.performAction(AccessibilityNodeInfo.ACTION_CLICK);
                     lastActionTime = System.currentTimeMillis();
@@ -239,7 +239,6 @@ public class AutoClickService extends AccessibilityService {
         return false;
     }
 
-    // 🚀 NEW: फ्रंटएंड को सिग्नल भेजने वाला ट्रिगर
     private void reportSuccessToApp() {
         new Handler(Looper.getMainLooper()).post(() -> {
             FilterBridgeModule.emitRideAccepted(detectedFare > 0 ? detectedFare : 0);
@@ -259,7 +258,6 @@ public class AutoClickService extends AccessibilityService {
     public void onInterrupt() {}
 }`;
 
-      // फाइलों को सेव करना
       fs.writeFileSync(path.join(resXmlPath, 'accessibility_service_config.xml'), xmlContent);
       fs.writeFileSync(path.join(javaPath, 'FilterBridgeModule.java'), bridgeModuleContent);
       fs.writeFileSync(path.join(javaPath, 'FilterBridgePackage.java'), bridgePackageContent);
@@ -269,41 +267,20 @@ public class AutoClickService extends AccessibilityService {
     }
   ]);
 
-  // 🚀 3. नया फिक्स: MainApplication में पैकेज को लिंक करना
+  // 🚀 FIX 2: 100% पक्का लिंकिंग कोड (Expo 50 Kotlin के लिए)
   config = withMainApplication(config, (config) => {
     let content = config.modResults.contents;
     
-    // Kotlin (Expo SDK 50+) को सपोर्ट करने के लिए
     if (config.modResults.language === 'kt') {
-      if (!content.includes('com.rider.acceptpro.FilterBridgePackage')) {
+      if (!content.includes('FilterBridgePackage')) {
+        // यह नया Regex बिल्कुल सटीक जगह पर फाइल को लिंक करेगा
         content = content.replace(
-          /^package .*/m,
-          `$&\nimport com.rider.acceptpro.FilterBridgePackage`
-        );
-      }
-      if (!content.includes('add(FilterBridgePackage())')) {
-        content = content.replace(
-          /add\(MyReactNativePackage\(\)\)/,
-          `add(MyReactNativePackage())\n        add(FilterBridgePackage())`
+          /PackageList\(this\)\.packages\.apply\s*\{/,
+          "PackageList(this).packages.apply {\n          add(com.rider.acceptpro.FilterBridgePackage())"
         );
       }
     }
-    // Java (पुराने वर्ज़न) को सपोर्ट करने के लिए
-    else if (config.modResults.language === 'java') {
-      if (!content.includes('com.rider.acceptpro.FilterBridgePackage')) {
-        content = content.replace(
-          /^package .*/m,
-          `$&\nimport com.rider.acceptpro.FilterBridgePackage;`
-        );
-      }
-      if (!content.includes('new FilterBridgePackage()')) {
-        content = content.replace(
-          /packages\.add\(new MyReactNativePackage\(\)\);/,
-          `packages.add(new MyReactNativePackage());\n          packages.add(new FilterBridgePackage());`
-        );
-      }
-    }
-
+    
     config.modResults.contents = content;
     return config;
   });
