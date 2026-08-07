@@ -3,7 +3,7 @@ const fs = require('fs');
 const path = require('path');
 
 module.exports = function withAndroidAutomator(config) {
-  // 1. AndroidManifest.xml में Accessibility Service जोड़ना
+  // 1. AndroidManifest.xml में सर्विस जोड़ना
   config = withAndroidManifest(config, (config) => {
     const manifest = config.modResults;
     const app = manifest.manifest.application[0];
@@ -51,7 +51,7 @@ module.exports = function withAndroidAutomator(config) {
     android:canRetrieveWindowContent="true"
     android:canPerformGestures="true" />`;
       
-      // --- Bridge Module (App.js से डेटा लेने के लिए) ---
+      // --- Bridge Module ---
       const bridgeModuleContent = `package com.rider.acceptpro;
 import com.facebook.react.bridge.ReactApplicationContext;
 import com.facebook.react.bridge.ReactContextBaseJavaModule;
@@ -84,7 +84,6 @@ public class FilterBridgeModule extends ReactContextBaseJavaModule {
 
     @ReactMethod
     public void updateAppStatus(String appId, boolean status) {
-        // यहाँ ऐप्स का स्टेटस स्टोर किया जा सकता है
     }
 }`;
 
@@ -112,7 +111,7 @@ public class FilterBridgePackage implements ReactPackage {
     }
 }`;
 
-      // --- Main AutoClickService (असली रोबोट इंजन) ---
+      // --- Main AutoClickService ---
       const serviceContent = `package com.rider.acceptpro;
 import android.accessibilityservice.AccessibilityService;
 import android.view.accessibility.AccessibilityEvent;
@@ -136,12 +135,10 @@ public class AutoClickService extends AccessibilityService {
         if (node.getText() != null) {
             String text = node.getText().toString().toLowerCase();
             
-            // अगर पसंदीदा लोकेशन मैच हो जाती है, तो किराया देखे बिना तुरंत क्लिक करो
             if (!FilterBridgeModule.savedLocation.isEmpty() && text.contains(FilterBridgeModule.savedLocation)) {
                 if (clickAcceptButton(node)) return;
             }
 
-            // किराए का नंबर ढूंढना और मिनिमम फेयर से तुलना करना
             if (text.contains("₹") || text.contains("rs")) {
                 try {
                     String cleanText = text.replaceAll("[^0-9]", "");
@@ -181,7 +178,7 @@ public class AutoClickService extends AccessibilityService {
     public void onInterrupt() {}
 }`;
 
-      // फाइलों को सही जगह सेव करना
+      // फाइलों को सेव करना
       fs.writeFileSync(path.join(resXmlPath, 'accessibility_service_config.xml'), xmlContent);
       fs.writeFileSync(path.join(javaPath, 'FilterBridgeModule.java'), bridgeModuleContent);
       fs.writeFileSync(path.join(javaPath, 'FilterBridgePackage.java'), bridgePackageContent);
@@ -189,5 +186,7 @@ public class AutoClickService extends AccessibilityService {
       
       return config;
     }
-  });
+  ]); // <-- यहीं पर मेरी गलती थी, मैंने यहाँ '})' लिख दिया था, जबकि '])' आना था।
+
+  return config;
 };
