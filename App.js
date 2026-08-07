@@ -5,7 +5,6 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 // ⚠️ यहाँ अपना असली बैकएंड URL डालें 
 const BACKEND_URL = "https://ride-auto-backend.onrender.com";
  
-
 // जावा इंजन से जुड़ने वाला ब्रिज
 const { FilterBridge } = NativeModules;
 
@@ -27,9 +26,10 @@ export default function App() {
   const [serviceOn, setServiceOn] = useState(false);
 
   const [paymentInfo, setPaymentInfo] = useState({ upiId: 'लोड हो रहा है...', upiNumber: '...', qrUrl: '' });
+  const [plansList, setPlansList] = useState([]); // प्लान्स लिस्ट के लिए स्टेट
   const [utr, setUtr] = useState('');
   const [selectedPlanDays, setSelectedPlanDays] = useState(7);
-  const [planAmount, setPlanAmount] = useState(39);
+  const [planAmount, setPlanAmount] = useState(199);
 
   const [perms, setPerms] = useState({ accessibility: false, overlay: false, battery: false, notifications: false });
 
@@ -41,9 +41,9 @@ export default function App() {
     { id: 'namma', name: 'Namma Yatri', desc: 'Auto / Taxi', status: false },
   ]);
 
-  // 🚀 ऐप खुलते ही चेक करना कि यूजर पहले से लॉगिन है या नहीं (Auto-Login)
   useEffect(() => {
     checkLoginStatus();
+    fetchPlans();
   }, []);
 
   const checkLoginStatus = async () => {
@@ -62,6 +62,18 @@ export default function App() {
       }
     } catch (e) { console.log('Error reading storage'); }
     setIsAppLoading(false);
+  };
+
+  // बैकएंड से प्लान्स मँगाने का फंक्शन
+  const fetchPlans = () => {
+    fetch(`${BACKEND_URL}/api/plans`)
+      .then(res => res.json())
+      .then(data => { 
+        if (data.success) {
+          setPlansList(data.data); 
+        }
+      })
+      .catch(err => console.log('Plans Fetch Error'));
   };
 
   useEffect(() => {
@@ -100,7 +112,6 @@ export default function App() {
           setMinFare(mFare);
           setPreferredLocation(pLoc);
           
-          // लॉगिन डेटा लोकल स्टोरेज में सेव करना
           await AsyncStorage.setItem('user_phone', phone);
           await AsyncStorage.setItem('is_sub_active', String(data.active || true));
           await AsyncStorage.setItem('min_fare', mFare);
@@ -125,7 +136,6 @@ export default function App() {
     if (FilterBridge) FilterBridge.setServiceStatus(false);
   };
 
-  // 🔥 सेटिंग्स को सर्वर और 'जावा इंजन' दोनों में सेव करना
   const saveFilters = async () => {
     try {
       const response = await fetch(`${BACKEND_URL}/api/settings`, {
@@ -138,7 +148,6 @@ export default function App() {
         await AsyncStorage.setItem('min_fare', minFare);
         await AsyncStorage.setItem('pref_loc', preferredLocation);
 
-        // जावा इंजन (Native Android) को सेटिंग्स भेजना
         if (FilterBridge) {
           FilterBridge.saveFilters(Number(minFare) || 0, preferredLocation || "");
         }
@@ -183,7 +192,6 @@ export default function App() {
     }
   };
 
-  // ऐप्स का स्टेटस जावा इंजन को भेजना
   const toggleAppStatus = (index, val) => {
     const newApps = [...appsStatus];
     newApps[index].status = val;
@@ -232,12 +240,17 @@ export default function App() {
           <Text style={{color: '#aaa', marginBottom: 20}}>Choose a plan, pay securely, and enter UTR.</Text>
           
           <View style={styles.planContainer}>
-            {[ {days: 1, p: 10}, {days: 7, p: 39}, {days: 30, p: 99} ].map((plan, i) => (
-              <TouchableOpacity key={i} style={[styles.planRow, selectedPlanDays === plan.days && styles.planRowActive]} onPress={() => {setSelectedPlanDays(plan.days); setPlanAmount(plan.p);}}>
-                <Text style={{color: '#fff', fontSize: 16, fontWeight: 'bold'}}>{plan.days} Day Plan</Text>
-                <Text style={{color: '#FFD700', fontSize: 16}}>Rs {plan.p}</Text>
+            {plansList.length > 0 ? plansList.map((plan, i) => (
+              <TouchableOpacity key={i} style={[styles.planRow, selectedPlanDays === plan.days && styles.planRowActive]} onPress={() => {setSelectedPlanDays(plan.days); setPlanAmount(plan.price);}}>
+                <View>
+                  <Text style={{color: '#fff', fontSize: 16, fontWeight: 'bold'}}>{plan.name}</Text>
+                  <Text style={{color: '#aaa', fontSize: 12}}>{plan.description}</Text>
+                </View>
+                <Text style={{color: '#FFD700', fontSize: 16, fontWeight: 'bold'}}>Rs {plan.price}</Text>
               </TouchableOpacity>
-            ))}
+            )) : (
+              <Text style={{color: '#aaa', textAlign: 'center', marginBottom: 15}}>प्लान लोड हो रहे हैं...</Text>
+            )}
           </View>
 
           <View style={styles.qrBox}>
@@ -434,7 +447,7 @@ const styles = StyleSheet.create({
   fixBtnTxt: { color: '#fff', fontWeight: 'bold', fontSize: 12 },
   appRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 15, borderBottomWidth: 1, borderBottomColor: '#1E2A32' },
   planContainer: { marginBottom: 20 },
-  planRow: { flexDirection: 'row', justifyContent: 'space-between', backgroundColor: '#1E2A32', padding: 15, borderRadius: 10, marginBottom: 10, borderWidth: 1, borderColor: 'transparent' },
+  planRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#1E2A32', padding: 15, borderRadius: 10, marginBottom: 10, borderWidth: 1, borderColor: 'transparent' },
   planRowActive: { borderColor: '#FFD700', backgroundColor: '#332700' },
   qrBox: { backgroundColor: '#1E2A32', padding: 20, borderRadius: 15, alignItems: 'center', marginBottom: 20, borderWidth: 1, borderColor: '#2A3942' },
   bottomNav: { position: 'absolute', bottom: 0, width: '100%', flexDirection: 'row', backgroundColor: '#111B21', borderTopWidth: 1, borderTopColor: '#1E2A32', paddingBottom: Platform.OS === 'ios' ? 20 : 0 },
