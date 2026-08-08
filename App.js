@@ -35,6 +35,7 @@ export default function App() {
 
   const [perms, setPerms] = useState({ accessibility: false, overlay: false, battery: false, notifications: false });
 
+  // 🚀 ऐप्स का स्टेट जो अब परमानेंट रहेगा
   const [appsStatus, setAppsStatus] = useState([
     { id: 'ola', name: 'Ola', desc: 'Cab / Auto', pkg: 'com.olacabs.oladriver', installed: false, status: false },
     { id: 'uber', name: 'Uber', desc: 'Cab / Moto', pkg: 'com.ubercab.driver', installed: false, status: false },
@@ -61,7 +62,6 @@ export default function App() {
     initializeApp();
   }, []);
 
-  // 🚀 ऐप लॉन्च होते ही सारा पुराना डेटा और सेटिंग्स सुरक्षित तरीके से लोड करना
   const initializeApp = async () => {
     await checkLoginStatus();
     fetchPlans();
@@ -99,10 +99,21 @@ export default function App() {
   const checkInstalledApps = async () => {
     if (!FilterBridge || !FilterBridge.checkAppInstalled) return;
     let updatedApps = [...appsStatus];
+    
     for (let i = 0; i < updatedApps.length; i++) {
       try {
         const isInstalled = await FilterBridge.checkAppInstalled(updatedApps[i].pkg);
         updatedApps[i].installed = isInstalled;
+        
+        // 🚀 लोकल स्टोरेज से चेक करो कि इस ऐप का अलाउड स्टेटस पहले क्या था
+        const savedAppStatus = await AsyncStorage.getItem(`app_status_${updatedApps[i].id}`);
+        if (savedAppStatus !== null) {
+          updatedApps[i].status = savedAppStatus === 'true';
+          if (updatedApps[i].status && FilterBridge.updateAppStatus) {
+            FilterBridge.updateAppStatus(updatedApps[i].id, true);
+          }
+        }
+
         if (!isInstalled) updatedApps[i].status = false;
       } catch (e) { console.log(e); }
     }
@@ -130,7 +141,6 @@ export default function App() {
     Alert.alert("Success", isSubActive ? "आपका प्लान एक्टिव है! ✅" : "अभी भी प्लान एक्टिव नहीं है। कृपया UTR चेक करें।");
   };
 
-  // 🚀 पक्का लॉगिन और डेटा रिकवरी स्टेटस
   const checkLoginStatus = async () => {
     try {
       const savedPhone = await AsyncStorage.getItem('user_phone');
@@ -138,6 +148,7 @@ export default function App() {
       const savedMinFare = await AsyncStorage.getItem('min_fare');
       const savedMaxFare = await AsyncStorage.getItem('max_fare');
       const savedLoc = await AsyncStorage.getItem('pref_loc');
+      const savedServiceState = await AsyncStorage.getItem('service_on');
 
       if (savedPhone) {
         setPhone(savedPhone);
@@ -150,6 +161,15 @@ export default function App() {
             FilterBridge.saveFilters(Number(savedMinFare) || 0, savedLoc);
           }
         }
+        
+        // 🚀 सर्विस स्टेटस रिस्टोर करें
+        if (savedServiceState === 'true' && savedSub === 'true') {
+          setServiceOn(true);
+          if (FilterBridge && FilterBridge.setServiceStatus) {
+            FilterBridge.setServiceStatus(true);
+          }
+        }
+
         setIsLoggedIn(true);
         syncSubscriptionStatus();
       }
@@ -285,20 +305,29 @@ export default function App() {
     } catch (e) { Linking.openSettings(); }
   };
 
-  const toggleServiceControl = (val) => {
+  // 🚀 सर्विस ऑन/ऑफ स्टेट को परमानेंट सेव करना
+  const toggleServiceControl = async (val) => {
     if (!isSubActive) return Alert.alert('Plan Inactive', 'Please activate a plan first.');
     if (val && (!perms.accessibility || !perms.overlay)) return Alert.alert('Permissions Required', 'Enable Overlay & Accessibility from Settings!');
+    
     setServiceOn(val);
-    if (FilterBridge && FilterBridge.setServiceStatus) FilterBridge.setServiceStatus(val);
+    await AsyncStorage.setItem('service_on', String(val));
+
+    if (FilterBridge && FilterBridge.setServiceStatus) {
+      FilterBridge.setServiceStatus(val);
+    }
   };
 
-  const toggleAppStatus = (index) => {
+  // 🚀 ऐप के Allowed/Paused स्टेटस को परमानेंट सेव करना
+  const toggleAppStatus = async (index) => {
     const newApps = [...appsStatus];
     if (!newApps[index].installed) return; 
     
     newApps[index].status = !newApps[index].status;
     setAppsStatus(newApps);
     
+    await AsyncStorage.setItem(`app_status_${newApps[index].id}`, String(newApps[index].status));
+
     if (FilterBridge && FilterBridge.updateAppStatus) {
       try {
          FilterBridge.updateAppStatus(newApps[index].id, newApps[index].status);
