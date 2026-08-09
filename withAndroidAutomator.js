@@ -13,9 +13,8 @@ module.exports = function withAndroidAutomator(config) {
         manifest.manifest.queries[0].package = [];
     }
 
-    // 🚀 FIX: Ola का सही नाम यहाँ भी अपडेट कर दिया गया
     const packagesToQuery = [
-        "com.olacabs.oladriver", "com.ubercab.driver", "com.rapido.rider",
+        "com.olacabs.partner", "com.ubercab.driver", "com.rapido.passenger.to",
         "in.juspay.nammayatripartner", "sinet.startup.inDriver", "com.blusmart.driver"
     ];
 
@@ -75,16 +74,17 @@ import android.content.pm.PackageManager;
 import android.content.Intent;
 import android.net.Uri;
 import android.provider.Settings;
+import android.os.PowerManager;
+import android.content.Context;
 import android.util.Log;
 import java.util.HashMap;
 
 public class FilterBridgeModule extends ReactContextBaseJavaModule {
     public static int savedMinFare = 0;
+    public static int savedMaxFare = 99999;
     public static String savedLocation = "";
     public static boolean isServiceRunning = false;
     private static ReactApplicationContext reactContext; 
-    
-    // 🚀 नया फिक्स: अब ऐप का Allowed/Paused स्टेटस यहाँ सेव होगा
     public static HashMap<String, Boolean> allowedApps = new HashMap<>();
 
     public FilterBridgeModule(ReactApplicationContext context) {
@@ -96,8 +96,9 @@ public class FilterBridgeModule extends ReactContextBaseJavaModule {
     public String getName() { return "FilterBridge"; }
 
     @ReactMethod
-    public void saveFilters(int minFare, String location) {
+    public void saveFilters(int minFare, int maxFare, String location) {
         savedMinFare = minFare;
+        savedMaxFare = maxFare > 0 ? maxFare : 99999;
         savedLocation = location != null ? location.toLowerCase().trim() : "";
     }
 
@@ -106,7 +107,6 @@ public class FilterBridgeModule extends ReactContextBaseJavaModule {
         isServiceRunning = status;
     }
 
-    // 🚀 अब यह बटन सच में काम करेगा!
     @ReactMethod
     public void updateAppStatus(String appId, boolean status) {
         allowedApps.put(appId, status);
@@ -120,6 +120,26 @@ public class FilterBridgeModule extends ReactContextBaseJavaModule {
             promise.resolve(true); 
         } catch (PackageManager.NameNotFoundException e) {
             promise.resolve(false); 
+        }
+    }
+
+    // 🚀 नया फिक्स: असली परमिशन चेकर (अब एंड्रॉइड से पूछकर सच बताएगा)
+    @ReactMethod
+    public void checkPermissions(Promise promise) {
+        WritableMap map = Arguments.createMap();
+        try {
+            Context ctx = getReactApplicationContext();
+            map.putBoolean("overlay", Settings.canDrawOverlays(ctx));
+            
+            String prefString = Settings.Secure.getString(ctx.getContentResolver(), Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES);
+            map.putBoolean("accessibility", prefString != null && prefString.contains(ctx.getPackageName()));
+            
+            PowerManager pm = (PowerManager) ctx.getSystemService(Context.POWER_SERVICE);
+            map.putBoolean("battery", pm.isIgnoringBatteryOptimizations(ctx.getPackageName()));
+            
+            promise.resolve(map);
+        } catch(Exception e) {
+            promise.reject("ERR", e.getMessage());
         }
     }
 
@@ -177,93 +197,108 @@ import android.accessibilityservice.GestureDescription;
 import android.graphics.Path;
 import android.view.accessibility.AccessibilityEvent;
 import android.view.accessibility.AccessibilityNodeInfo;
-import android.util.Log;
 import android.os.Handler;
 import android.os.Looper;
 
 public class AutoClickService extends AccessibilityService {
     private long lastActionTime = 0;
     private int detectedFare = 0;
+    private boolean isCriteriaMet = false;
+    private boolean isLocationMatched = false;
 
     @Override
     public void onAccessibilityEvent(AccessibilityEvent event) {
         if (!FilterBridgeModule.isServiceRunning) return;
         
-        // 🚀 नया फिक्स: ऑटो-क्लिकर अब चेक करेगा कि ऐप Allowed है या Paused
         CharSequence pkgNameSeq = event.getPackageName();
         if (pkgNameSeq != null) {
             String pkg = pkgNameSeq.toString();
             String currentAppId = "";
-            if (pkg.contains("oladriver")) currentAppId = "ola";
+            if (pkg.contains("olacabs.partner")) currentAppId = "ola";
             else if (pkg.contains("ubercab.driver")) currentAppId = "uber";
-            else if (pkg.contains("rapido.rider")) currentAppId = "rapido";
+            else if (pkg.contains("rapido.passenger")) currentAppId = "rapido";
             else if (pkg.contains("nammayatripartner")) currentAppId = "namma";
             else if (pkg.contains("inDriver")) currentAppId = "indrive";
             else if (pkg.contains("blusmart.driver")) currentAppId = "blusmart";
             
             if (!currentAppId.isEmpty()) {
                 Boolean isAllowed = FilterBridgeModule.allowedApps.get(currentAppId);
-                // अगर तुमने बटन से ऐप को Allow नहीं किया है (यानी वो Paused है), 
-                // तो बॉट तुरंत वापस लौट जाएगा और कुछ नहीं करेगा!
                 if (isAllowed == null || !isAllowed) return; 
             }
         }
 
         AccessibilityNodeInfo rootNode = getRootInActiveWindow();
         if (rootNode != null) {
+            // 🚀 2 सेकंड का कूलडाउन ताकि बार-बार क्लिक न करे
+            if (System.currentTimeMillis() - lastActionTime < 2000) return; 
+            
             detectedFare = 0;
-            scanAndAcceptFast(rootNode);
+            isCriteriaMet = false;
+            isLocationMatched = FilterBridgeModule.savedLocation.isEmpty();
+            
+            // 🚀 स्टेप 1: पूरी स्क्रीन स्कैन करो और पढ़ो (AI Brain)
+            analyzeScreen(rootNode);
+            
+            // 🚀 स्टेप 2: अगर पैसा और लोकेशन मैच हुआ, तो शिकारी मोड चालू करो!
+            if (isCriteriaMet && isLocationMatched) {
+                if (huntAndAccept(rootNode)) {
+                    lastActionTime = System.currentTimeMillis();
+                    reportSuccessToApp();
+                }
+            }
         }
     }
 
-    private void scanAndAcceptFast(AccessibilityNodeInfo node) {
+    private void analyzeScreen(AccessibilityNodeInfo node) {
         if (node == null) return;
         CharSequence textSeq = node.getText();
         if (textSeq != null) {
             String text = textSeq.toString().toLowerCase();
             if (!FilterBridgeModule.savedLocation.isEmpty() && text.contains(FilterBridgeModule.savedLocation)) {
-                if (executeFastAction(node)) return;
+                isLocationMatched = true;
             }
             if (text.contains("₹") || text.contains("rs")) {
                 try {
                     String cleanText = text.replaceAll("[^0-9]", "");
                     if (!cleanText.isEmpty()) {
                         int fare = Integer.parseInt(cleanText);
-                        detectedFare = fare; 
-                        if (fare >= FilterBridgeModule.savedMinFare) {
-                            if (executeFastAction(node)) return;
+                        // 🚀 मैक्स और मिनिमम दोनों चेक करेगा
+                        if (fare >= FilterBridgeModule.savedMinFare && fare <= FilterBridgeModule.savedMaxFare) {
+                            detectedFare = fare;
+                            isCriteriaMet = true;
                         }
                     }
                 } catch (Exception e) {}
             }
         }
-        int childCount = node.getChildCount();
-        for (int i = 0; i < childCount; i++) {
-            scanAndAcceptFast(node.getChild(i));
+        for (int i = 0; i < node.getChildCount(); i++) {
+            analyzeScreen(node.getChild(i));
         }
     }
 
-    private boolean executeFastAction(AccessibilityNodeInfo node) {
-        if (System.currentTimeMillis() - lastActionTime < 50) return false;
-        AccessibilityNodeInfo current = node;
-        while (current != null) {
-            CharSequence nodeText = current.getText();
-            if (nodeText != null) {
-                String t = nodeText.toString().toLowerCase();
-                if (t.contains("slide") || t.contains("swipe") || t.contains("स्लाइड")) {
-                    performInstantSwipe();
-                    lastActionTime = System.currentTimeMillis();
-                    reportSuccessToApp();
-                    return true;
-                }
-                if ((t.contains("accept") || t.contains("स्वीकार") || t.contains("pick")) && current.isClickable()) {
-                    current.performAction(AccessibilityNodeInfo.ACTION_CLICK);
-                    lastActionTime = System.currentTimeMillis();
-                    reportSuccessToApp();
-                    return true;
+    private boolean huntAndAccept(AccessibilityNodeInfo node) {
+        if (node == null) return false;
+        CharSequence textSeq = node.getText();
+        if (textSeq != null) {
+            String t = textSeq.toString().toLowerCase();
+            if (t.contains("slide") || t.contains("swipe") || t.contains("स्लाइड")) {
+                performInstantSwipe();
+                return true;
+            }
+            // 🚀 पूरी स्क्रीन में कहीं भी ये कीवर्ड मिले, तो एक्सेप्ट मारेगा
+            if (t.contains("accept") || t.contains("स्वीकार") || t.contains("pick") || t.contains("go")) {
+                AccessibilityNodeInfo current = node;
+                while (current != null) {
+                    if (current.isClickable()) {
+                        current.performAction(AccessibilityNodeInfo.ACTION_CLICK);
+                        return true;
+                    }
+                    current = current.getParent(); // अगर खुद क्लिकेबल नहीं है, तो पेरेंट बटन पर क्लिक मारो
                 }
             }
-            current = current.getParent();
+        }
+        for (int i = 0; i < node.getChildCount(); i++) {
+            if (huntAndAccept(node.getChild(i))) return true;
         }
         return false;
     }
