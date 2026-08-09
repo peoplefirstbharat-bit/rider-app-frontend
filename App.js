@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { View, Text, TextInput, TouchableOpacity, StyleSheet, StatusBar, Alert, ActivityIndicator, ScrollView, Switch, Image, Linking, Platform, NativeModules, AppState, DeviceEventEmitter } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import DeviceInfo from 'react-native-device-info';
 
 const BACKEND_URL = "https://ride-auto-backend.onrender.com";
 const { FilterBridge } = NativeModules;
@@ -35,11 +34,10 @@ export default function App() {
 
   const [perms, setPerms] = useState({ accessibility: false, overlay: false, battery: false, notifications: false });
 
-  // 🚀 ऐप्स का स्टेट जो अब परमानेंट रहेगा
   const [appsStatus, setAppsStatus] = useState([
-    { id: 'ola', name: 'Ola', desc: 'Cab / Auto', pkg: 'com.olacabs.oladriver', installed: false, status: false },
+    { id: 'ola', name: 'Ola', desc: 'Cab / Auto', pkg: 'com.olacabs.partner', installed: false, status: false },
     { id: 'uber', name: 'Uber', desc: 'Cab / Moto', pkg: 'com.ubercab.driver', installed: false, status: false },
-    { id: 'rapido', name: 'Rapido', desc: 'Bike taxi', pkg: 'com.rapido.rider', installed: false, status: false },
+    { id: 'rapido', name: 'Rapido', desc: 'Bike taxi', pkg: 'com.rapido.passenger.to', installed: false, status: false },
     { id: 'namma', name: 'Namma Yatri', desc: 'Auto / Taxi', pkg: 'in.juspay.nammayatripartner', installed: false, status: false },
     { id: 'indrive', name: 'inDrive', desc: 'Ride sharing', pkg: 'sinet.startup.inDriver', installed: false, status: false },
     { id: 'blusmart', name: 'BluSmart', desc: 'EV cab', pkg: 'com.blusmart.driver', installed: false, status: false },
@@ -74,25 +72,26 @@ export default function App() {
       if (nextAppState === 'active') {
         if (isLoggedIn && phone) syncSubscriptionStatus();
         checkInstalledApps();
-        checkRealPermissions();
+        checkRealPermissions(); // 🚀 ऐप खुलते ही सिस्टम से असली परमिशन पूछेगा
       }
     });
     return () => subscription.remove();
   }, [isLoggedIn, phone]);
 
+  // 🚀 FIX: झूठा हरा टिक बंद, अब सीधे Android OS से पूछेगा कि परमिशन मिली या नहीं
   const checkRealPermissions = async () => {
     if (Platform.OS !== 'android') return;
     try {
-      const accSaved = await AsyncStorage.getItem('perm_acc');
-      const overSaved = await AsyncStorage.getItem('perm_over');
-      const batSaved = await AsyncStorage.getItem('perm_bat');
-
-      setPerms({
-        accessibility: accSaved === 'true',
-        overlay: overSaved === 'true',
-        battery: batSaved === 'true',
-        notifications: true
-      });
+      if (FilterBridge && FilterBridge.checkPermissions) {
+        const permsStatus = await FilterBridge.checkPermissions();
+        setPerms(prev => ({
+          ...prev,
+          accessibility: permsStatus.accessibility,
+          overlay: permsStatus.overlay,
+          battery: permsStatus.battery,
+          notifications: true // Notifications normally requested via prompt
+        }));
+      }
     } catch (e) {}
   };
 
@@ -105,7 +104,6 @@ export default function App() {
         const isInstalled = await FilterBridge.checkAppInstalled(updatedApps[i].pkg);
         updatedApps[i].installed = isInstalled;
         
-        // 🚀 लोकल स्टोरेज से चेक करो कि इस ऐप का अलाउड स्टेटस पहले क्या था
         const savedAppStatus = await AsyncStorage.getItem(`app_status_${updatedApps[i].id}`);
         if (savedAppStatus !== null) {
           updatedApps[i].status = savedAppStatus === 'true';
@@ -113,9 +111,8 @@ export default function App() {
             FilterBridge.updateAppStatus(updatedApps[i].id, true);
           }
         }
-
         if (!isInstalled) updatedApps[i].status = false;
-      } catch (e) { console.log(e); }
+      } catch (e) {}
     }
     setAppsStatus(updatedApps);
   };
@@ -155,14 +152,12 @@ export default function App() {
         setIsSubActive(savedSub === 'true');
         if (savedMinFare) setMinFare(savedMinFare);
         if (savedMaxFare) setMaxFare(savedMaxFare);
-        if (savedLoc) {
-          setPreferredLocation(savedLoc);
-          if (FilterBridge && FilterBridge.saveFilters) {
-            FilterBridge.saveFilters(Number(savedMinFare) || 0, savedLoc);
-          }
+        if (savedLoc) setPreferredLocation(savedLoc);
+        
+        if (FilterBridge && FilterBridge.saveFilters) {
+          FilterBridge.saveFilters(Number(savedMinFare) || 0, Number(savedMaxFare) || 99999, savedLoc || "");
         }
         
-        // 🚀 सर्विस स्टेटस रिस्टोर करें
         if (savedServiceState === 'true' && savedSub === 'true') {
           setServiceOn(true);
           if (FilterBridge && FilterBridge.setServiceStatus) {
@@ -203,12 +198,12 @@ export default function App() {
     setLoading(true);
     const endpoint = isLoginMode ? '/api/login' : '/api/register';
     try {
-      // 🚀 FIX: अगर असली Device ID नहीं मिलती, तो एक यूनीक रैंडम ID जनरेट करेगा!
-      let deviceId = "unknown_device_" + Math.floor(Math.random() * 1000000000);
-      try { 
-        const realId = await DeviceInfo.getUniqueId(); 
-        if (realId) deviceId = realId;
-      } catch (e) {}
+      // 🚀 FIX: परमानेंट UUID जेनरेट कर रहे हैं, जो फोन से कभी नहीं मिटेगा
+      let deviceId = await AsyncStorage.getItem('secure_device_id');
+      if (!deviceId) {
+        deviceId = "device_" + Date.now() + "_" + Math.floor(Math.random() * 1000000000);
+        await AsyncStorage.setItem('secure_device_id', deviceId);
+      }
 
       const response = await fetch(`${BACKEND_URL}${endpoint}`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ phone, pin, deviceId })
@@ -235,6 +230,10 @@ export default function App() {
           await AsyncStorage.setItem('max_fare', mxFare);
           await AsyncStorage.setItem('pref_loc', pLoc);
           setIsLoggedIn(true);
+          
+          if (FilterBridge && FilterBridge.saveFilters) {
+            FilterBridge.saveFilters(Number(mFare) || 0, Number(mxFare) || 99999, pLoc);
+          }
         }
       } else { Alert.alert('Error', data.message); }
     } catch (error) { Alert.alert('Error', 'Server unreachable'); }
@@ -242,7 +241,8 @@ export default function App() {
   };
 
   const handleLogout = async () => {
-    await AsyncStorage.clear();
+    await AsyncStorage.removeItem('user_phone');
+    await AsyncStorage.removeItem('is_sub_active');
     setIsLoggedIn(false); setPhone(''); setPin('');
     if (FilterBridge && FilterBridge.setServiceStatus) FilterBridge.setServiceStatus(false);
   };
@@ -254,7 +254,7 @@ export default function App() {
       await AsyncStorage.setItem('pref_loc', preferredLocation);
 
       if (FilterBridge && FilterBridge.saveFilters) {
-        FilterBridge.saveFilters(Number(minFare) || 0, preferredLocation || "");
+        FilterBridge.saveFilters(Number(minFare) || 0, Number(maxFare) || 99999, preferredLocation || "");
       }
 
       Alert.alert('Saved', 'Filters updated successfully!');
@@ -288,28 +288,20 @@ export default function App() {
     try {
       if (type === 'accessibility') { 
         Linking.sendIntent('android.settings.ACCESSIBILITY_SETTINGS'); 
-        setPerms(prev => ({...prev, accessibility: true}));
-        await AsyncStorage.setItem('perm_acc', 'true');
       }
       else if (type === 'overlay') { 
         Linking.sendIntent('android.settings.action.MANAGE_OVERLAY_PERMISSION'); 
-        setPerms(prev => ({...prev, overlay: true}));
-        await AsyncStorage.setItem('perm_over', 'true');
       }
       else if (type === 'battery') { 
         if (FilterBridge && FilterBridge.requestBatteryOptimization) FilterBridge.requestBatteryOptimization(); 
         else Linking.sendIntent('android.settings.IGNORE_BATTERY_OPTIMIZATION_SETTINGS'); 
-        setPerms(prev => ({...prev, battery: true}));
-        await AsyncStorage.setItem('perm_bat', 'true');
       }
       else if (type === 'notifications') { 
         Linking.sendIntent('android.settings.ACTION_NOTIFICATION_LISTENER_SETTINGS'); 
-        setPerms(prev => ({...prev, notifications: true}));
       }
     } catch (e) { Linking.openSettings(); }
   };
 
-  // 🚀 सर्विस ऑन/ऑफ स्टेट को परमानेंट सेव करना
   const toggleServiceControl = async (val) => {
     if (!isSubActive) return Alert.alert('Plan Inactive', 'Please activate a plan first.');
     if (val && (!perms.accessibility || !perms.overlay)) return Alert.alert('Permissions Required', 'Enable Overlay & Accessibility from Settings!');
@@ -322,7 +314,6 @@ export default function App() {
     }
   };
 
-  // 🚀 ऐप के Allowed/Paused स्टेटस को परमानेंट सेव करना
   const toggleAppStatus = async (index) => {
     const newApps = [...appsStatus];
     if (!newApps[index].installed) return; 
