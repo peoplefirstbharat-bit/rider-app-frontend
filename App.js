@@ -203,8 +203,12 @@ export default function App() {
     setLoading(true);
     const endpoint = isLoginMode ? '/api/login' : '/api/register';
     try {
-      let deviceId = "unknown_device";
-      try { deviceId = await DeviceInfo.getUniqueId(); } catch (e) {}
+      // 🚀 FIX: अगर असली Device ID नहीं मिलती, तो एक यूनीक रैंडम ID जनरेट करेगा!
+      let deviceId = "unknown_device_" + Math.floor(Math.random() * 1000000000);
+      try { 
+        const realId = await DeviceInfo.getUniqueId(); 
+        if (realId) deviceId = realId;
+      } catch (e) {}
 
       const response = await fetch(`${BACKEND_URL}${endpoint}`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ phone, pin, deviceId })
