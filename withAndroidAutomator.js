@@ -124,7 +124,6 @@ public class FilterBridgeModule extends ReactContextBaseJavaModule {
         }
     }
 
-    // 🚀 फिक्स: अब Notifications का भी असली परमिशन चेक होगा!
     @ReactMethod
     public void checkPermissions(Promise promise) {
         WritableMap map = Arguments.createMap();
@@ -204,6 +203,8 @@ import android.view.accessibility.AccessibilityNodeInfo;
 import android.os.Handler;
 import android.os.Looper;
 import android.util.DisplayMetrics;
+import java.util.regex.Pattern;
+import java.util.regex.Matcher;
 
 public class AutoClickService extends AccessibilityService {
     private long lastActionTime = 0;
@@ -234,98 +235,126 @@ public class AutoClickService extends AccessibilityService {
 
         AccessibilityNodeInfo rootNode = getRootInActiveWindow();
         if (rootNode != null) {
-            if (System.currentTimeMillis() - lastActionTime < 2000) return; 
+            if (System.currentTimeMillis() - lastActionTime < 1500) return; // 1.5s Cooldown
             
             detectedFare = 0;
             isCriteriaMet = false;
             isLocationMatched = FilterBridgeModule.savedLocation.isEmpty();
             
-            // 🚀 स्टेप 1: AI Brain - पूरी स्क्रीन स्कैन करो
+            // 🚀 स्टेप 1: AI Brain - सिर्फ असली पैसे को पकड़ेगा!
             analyzeScreen(rootNode);
             
-            // 🚀 स्टेप 2: Hunter Mode - अगर मैच हुआ तो एक्सेप्ट मारो
+            // 🚀 स्टेप 2: Hunter Mode - अगर पैसा मैच हुआ तो वार करो!
             if (isCriteriaMet && isLocationMatched) {
-                if (huntAndAccept(rootNode)) {
-                    lastActionTime = System.currentTimeMillis();
-                    reportSuccessToApp();
+                boolean clickedByKeyword = huntAndAccept(rootNode);
+                
+                // अगर 'Accept' या 'Swipe' शब्द नहीं मिला, तो ज़बरदस्ती नीचे टैप और स्वाइप मारो (Uber/Ola के लिए)
+                if (!clickedByKeyword) {
+                    forceAcceptAction();
                 }
+                
+                lastActionTime = System.currentTimeMillis();
+                reportSuccessToApp();
             }
         }
     }
 
     private void analyzeScreen(AccessibilityNodeInfo node) {
         if (node == null) return;
-        CharSequence textSeq = node.getText();
-        if (textSeq != null) {
-            String text = textSeq.toString().toLowerCase();
-            if (!FilterBridgeModule.savedLocation.isEmpty() && text.contains(FilterBridgeModule.savedLocation)) {
-                isLocationMatched = true;
-            }
-            if (text.contains("₹") || text.contains("rs") || text.contains("inr")) {
-                try {
-                    // 🚀 Decimal Bug Fixed: अब यह डॉट (Decimal) को भी समझेगा!
-                    String cleanText = text.replaceAll("[^0-9.]", "");
-                    if (!cleanText.isEmpty()) {
-                        float floatFare = Float.parseFloat(cleanText);
-                        int fare = Math.round(floatFare); // 150.50 को 151 मानेगा
-                        if (fare >= FilterBridgeModule.savedMinFare && fare <= FilterBridgeModule.savedMaxFare) {
-                            detectedFare = fare;
-                            isCriteriaMet = true;
-                        }
-                    }
-                } catch (Exception e) {}
-            }
-        }
+        
+        extractFareAndLocation(node.getText());
+        extractFareAndLocation(node.getContentDescription()); // अदृश्य टेक्स्ट भी पढ़ेगा
+        
         for (int i = 0; i < node.getChildCount(); i++) {
             analyzeScreen(node.getChild(i));
+        }
+    }
+
+    private void extractFareAndLocation(CharSequence textSeq) {
+        if (textSeq == null) return;
+        String text = textSeq.toString().toLowerCase();
+
+        if (!FilterBridgeModule.savedLocation.isEmpty() && text.contains(FilterBridgeModule.savedLocation)) {
+            isLocationMatched = true;
+        }
+
+        if (text.contains("₹") || text.contains("rs") || text.contains("inr")) {
+            try {
+                // 🚀 असली गॉड मोड Regex: यह सिर्फ ₹ के बगल वाले नंबर को पकड़ेगा! (जैसे 150.50)
+                Pattern p1 = Pattern.compile("(?:₹|rs\\\\.?|inr)\\s*([0-9]+(?:\\\\.[0-9]+)?)");
+                Matcher m1 = p1.matcher(text);
+                
+                Pattern p2 = Pattern.compile("([0-9]+(?:\\\\.[0-9]+)?)\\s*(?:₹|rs\\\\.?|inr)");
+                Matcher m2 = p2.matcher(text);
+
+                String fareString = "";
+                if (m1.find()) fareString = m1.group(1);
+                else if (m2.find()) fareString = m2.group(1);
+
+                if (!fareString.isEmpty()) {
+                    float floatFare = Float.parseFloat(fareString);
+                    int fare = Math.round(floatFare);
+                    if (fare >= FilterBridgeModule.savedMinFare && fare <= FilterBridgeModule.savedMaxFare) {
+                        detectedFare = fare;
+                        isCriteriaMet = true;
+                    }
+                }
+            } catch (Exception e) {}
         }
     }
 
     private boolean huntAndAccept(AccessibilityNodeInfo node) {
         if (node == null) return false;
         CharSequence textSeq = node.getText();
-        if (textSeq != null) {
-            String t = textSeq.toString().toLowerCase();
-            if (t.contains("slide") || t.contains("swipe") || t.contains("स्लाइड")) {
-                performInstantSwipe();
-                return true;
-            }
-            if (t.contains("accept") || t.contains("स्वीकार") || t.contains("pick") || t.contains("go")) {
-                AccessibilityNodeInfo current = node;
-                while (current != null) {
-                    if (current.isClickable()) {
-                        current.performAction(AccessibilityNodeInfo.ACTION_CLICK);
-                        return true;
-                    }
-                    current = current.getParent(); 
+        CharSequence descSeq = node.getContentDescription();
+        
+        String t = textSeq != null ? textSeq.toString().toLowerCase() : "";
+        String d = descSeq != null ? descSeq.toString().toLowerCase() : "";
+        String combined = t + " " + d;
+
+        if (combined.contains("slide") || combined.contains("swipe") || combined.contains("स्लाइड")) {
+            forceAcceptAction(); // स्वाइप वाले में सीधे फ़ोर्स एक्शन चलाओ
+            return true;
+        }
+        
+        if (combined.contains("accept") || combined.contains("स्वीकार") || combined.contains("pick") || combined.contains("go")) {
+            AccessibilityNodeInfo current = node;
+            while (current != null) {
+                if (current.isClickable()) {
+                    current.performAction(AccessibilityNodeInfo.ACTION_CLICK);
+                    return true;
                 }
+                current = current.getParent(); 
             }
         }
+        
         for (int i = 0; i < node.getChildCount(); i++) {
             if (huntAndAccept(node.getChild(i))) return true;
         }
         return false;
     }
 
-    private void reportSuccessToApp() {
-        new Handler(Looper.getMainLooper()).post(() -> {
-            FilterBridgeModule.emitRideAccepted(detectedFare > 0 ? detectedFare : 0);
-        });
-    }
-
-    private void performInstantSwipe() {
-        // 🚀 Swipe Bug Fixed: अब हर स्क्रीन के साइज को खुद नापकर परफेक्ट स्वाइप करेगा!
+    // 🚀 THE ULTIMATE WEAPON: अगर बटन नहीं मिल रहा तो स्क्रीन के नीचे ज़बरदस्ती वार करो!
+    private void forceAcceptAction() {
         DisplayMetrics metrics = getResources().getDisplayMetrics();
-        float startX = metrics.widthPixels * 0.2f;  // स्क्रीन के 20% हिस्से से शुरू
-        float endX = metrics.widthPixels * 0.8f;    // स्क्रीन के 80% हिस्से तक जाएगा
-        float y = metrics.heightPixels * 0.85f;     // स्क्रीन के नीचे वाले हिस्से (85%) पर स्वाइप करेगा
+        float startX = metrics.widthPixels * 0.1f;
+        float endX = metrics.widthPixels * 0.9f;
+        float y = metrics.heightPixels * 0.85f; // स्क्रीन के नीचे 85% हिस्से पर (जहाँ बटन होता है)
 
-        Path path = new Path();
-        path.moveTo(startX, y); 
-        path.lineTo(endX, y); 
-        GestureDescription.Builder builder = new GestureDescription.Builder();
-        builder.addStroke(new GestureDescription.StrokeDescription(path, 0, 100));
-        dispatchGesture(builder.build(), null, null);
+        // 1. पहला वार: बीच में ज़ोर से टैप करो (Uber के लिए)
+        Path tapPath = new Path();
+        tapPath.moveTo(metrics.widthPixels / 2f, y);
+        GestureDescription.Builder tapBuilder = new GestureDescription.Builder();
+        tapBuilder.addStroke(new GestureDescription.StrokeDescription(tapPath, 0, 50));
+        dispatchGesture(tapBuilder.build(), null, null);
+
+        // 2. दूसरा वार: तुरंत बाद एक लम्बा स्वाइप मारो (Ola / InDrive के लिए)
+        Path swipePath = new Path();
+        swipePath.moveTo(startX, y);
+        swipePath.lineTo(endX, y);
+        GestureDescription.Builder swipeBuilder = new GestureDescription.Builder();
+        swipeBuilder.addStroke(new GestureDescription.StrokeDescription(swipePath, 100, 200));
+        dispatchGesture(swipeBuilder.build(), null, null);
     }
 
     @Override
