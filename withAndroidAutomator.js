@@ -76,6 +76,7 @@ import android.net.Uri;
 import android.provider.Settings;
 import android.os.PowerManager;
 import android.content.Context;
+import androidx.core.app.NotificationManagerCompat;
 import android.util.Log;
 import java.util.HashMap;
 
@@ -123,7 +124,7 @@ public class FilterBridgeModule extends ReactContextBaseJavaModule {
         }
     }
 
-    // 🚀 नया फिक्स: असली परमिशन चेकर (अब एंड्रॉइड से पूछकर सच बताएगा)
+    // 🚀 फिक्स: अब Notifications का भी असली परमिशन चेक होगा!
     @ReactMethod
     public void checkPermissions(Promise promise) {
         WritableMap map = Arguments.createMap();
@@ -136,6 +137,9 @@ public class FilterBridgeModule extends ReactContextBaseJavaModule {
             
             PowerManager pm = (PowerManager) ctx.getSystemService(Context.POWER_SERVICE);
             map.putBoolean("battery", pm.isIgnoringBatteryOptimizations(ctx.getPackageName()));
+            
+            boolean hasNotificationPerm = NotificationManagerCompat.from(ctx).areNotificationsEnabled();
+            map.putBoolean("notifications", hasNotificationPerm);
             
             promise.resolve(map);
         } catch(Exception e) {
@@ -199,6 +203,7 @@ import android.view.accessibility.AccessibilityEvent;
 import android.view.accessibility.AccessibilityNodeInfo;
 import android.os.Handler;
 import android.os.Looper;
+import android.util.DisplayMetrics;
 
 public class AutoClickService extends AccessibilityService {
     private long lastActionTime = 0;
@@ -229,17 +234,16 @@ public class AutoClickService extends AccessibilityService {
 
         AccessibilityNodeInfo rootNode = getRootInActiveWindow();
         if (rootNode != null) {
-            // 🚀 2 सेकंड का कूलडाउन ताकि बार-बार क्लिक न करे
             if (System.currentTimeMillis() - lastActionTime < 2000) return; 
             
             detectedFare = 0;
             isCriteriaMet = false;
             isLocationMatched = FilterBridgeModule.savedLocation.isEmpty();
             
-            // 🚀 स्टेप 1: पूरी स्क्रीन स्कैन करो और पढ़ो (AI Brain)
+            // 🚀 स्टेप 1: AI Brain - पूरी स्क्रीन स्कैन करो
             analyzeScreen(rootNode);
             
-            // 🚀 स्टेप 2: अगर पैसा और लोकेशन मैच हुआ, तो शिकारी मोड चालू करो!
+            // 🚀 स्टेप 2: Hunter Mode - अगर मैच हुआ तो एक्सेप्ट मारो
             if (isCriteriaMet && isLocationMatched) {
                 if (huntAndAccept(rootNode)) {
                     lastActionTime = System.currentTimeMillis();
@@ -257,12 +261,13 @@ public class AutoClickService extends AccessibilityService {
             if (!FilterBridgeModule.savedLocation.isEmpty() && text.contains(FilterBridgeModule.savedLocation)) {
                 isLocationMatched = true;
             }
-            if (text.contains("₹") || text.contains("rs")) {
+            if (text.contains("₹") || text.contains("rs") || text.contains("inr")) {
                 try {
-                    String cleanText = text.replaceAll("[^0-9]", "");
+                    // 🚀 Decimal Bug Fixed: अब यह डॉट (Decimal) को भी समझेगा!
+                    String cleanText = text.replaceAll("[^0-9.]", "");
                     if (!cleanText.isEmpty()) {
-                        int fare = Integer.parseInt(cleanText);
-                        // 🚀 मैक्स और मिनिमम दोनों चेक करेगा
+                        float floatFare = Float.parseFloat(cleanText);
+                        int fare = Math.round(floatFare); // 150.50 को 151 मानेगा
                         if (fare >= FilterBridgeModule.savedMinFare && fare <= FilterBridgeModule.savedMaxFare) {
                             detectedFare = fare;
                             isCriteriaMet = true;
@@ -285,7 +290,6 @@ public class AutoClickService extends AccessibilityService {
                 performInstantSwipe();
                 return true;
             }
-            // 🚀 पूरी स्क्रीन में कहीं भी ये कीवर्ड मिले, तो एक्सेप्ट मारेगा
             if (t.contains("accept") || t.contains("स्वीकार") || t.contains("pick") || t.contains("go")) {
                 AccessibilityNodeInfo current = node;
                 while (current != null) {
@@ -293,7 +297,7 @@ public class AutoClickService extends AccessibilityService {
                         current.performAction(AccessibilityNodeInfo.ACTION_CLICK);
                         return true;
                     }
-                    current = current.getParent(); // अगर खुद क्लिकेबल नहीं है, तो पेरेंट बटन पर क्लिक मारो
+                    current = current.getParent(); 
                 }
             }
         }
@@ -310,9 +314,15 @@ public class AutoClickService extends AccessibilityService {
     }
 
     private void performInstantSwipe() {
+        // 🚀 Swipe Bug Fixed: अब हर स्क्रीन के साइज को खुद नापकर परफेक्ट स्वाइप करेगा!
+        DisplayMetrics metrics = getResources().getDisplayMetrics();
+        float startX = metrics.widthPixels * 0.2f;  // स्क्रीन के 20% हिस्से से शुरू
+        float endX = metrics.widthPixels * 0.8f;    // स्क्रीन के 80% हिस्से तक जाएगा
+        float y = metrics.heightPixels * 0.85f;     // स्क्रीन के नीचे वाले हिस्से (85%) पर स्वाइप करेगा
+
         Path path = new Path();
-        path.moveTo(150, 1500); 
-        path.lineTo(900, 1500); 
+        path.moveTo(startX, y); 
+        path.lineTo(endX, y); 
         GestureDescription.Builder builder = new GestureDescription.Builder();
         builder.addStroke(new GestureDescription.StrokeDescription(path, 0, 100));
         dispatchGesture(builder.build(), null, null);
