@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { View, Text, TextInput, TouchableOpacity, StyleSheet, StatusBar, Alert, ActivityIndicator, ScrollView, Switch, Image, Linking, Platform, NativeModules, AppState, DeviceEventEmitter } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import DeviceInfo from 'react-native-device-info'; // 🚀 इसे वापस ले आये, पुराने अकाउंट्स को जिन्दा करने के लिए!
 
 const BACKEND_URL = "https://ride-auto-backend.onrender.com";
 const { FilterBridge } = NativeModules;
@@ -72,13 +73,12 @@ export default function App() {
       if (nextAppState === 'active') {
         if (isLoggedIn && phone) syncSubscriptionStatus();
         checkInstalledApps();
-        checkRealPermissions(); // 🚀 ऐप खुलते ही सिस्टम से असली परमिशन पूछेगा
+        checkRealPermissions(); 
       }
     });
     return () => subscription.remove();
   }, [isLoggedIn, phone]);
 
-  // 🚀 FIX: झूठा हरा टिक बंद, अब सीधे Android OS से पूछेगा कि परमिशन मिली या नहीं
   const checkRealPermissions = async () => {
     if (Platform.OS !== 'android') return;
     try {
@@ -89,7 +89,7 @@ export default function App() {
           accessibility: permsStatus.accessibility,
           overlay: permsStatus.overlay,
           battery: permsStatus.battery,
-          notifications: true // Notifications normally requested via prompt
+          notifications: permsStatus.notifications // 🚀 अब Notifications का भी असली सच पता चलेगा!
         }));
       }
     } catch (e) {}
@@ -107,9 +107,13 @@ export default function App() {
         const savedAppStatus = await AsyncStorage.getItem(`app_status_${updatedApps[i].id}`);
         if (savedAppStatus !== null) {
           updatedApps[i].status = savedAppStatus === 'true';
-          if (updatedApps[i].status && FilterBridge.updateAppStatus) {
-            FilterBridge.updateAppStatus(updatedApps[i].id, true);
-          }
+        } else {
+          // 🚀 Default Allowed Fix: अब कोई भी ऐप पहली बार में 'Allowed' ही रहेगा!
+          updatedApps[i].status = true; 
+        }
+        
+        if (updatedApps[i].status && FilterBridge.updateAppStatus) {
+          FilterBridge.updateAppStatus(updatedApps[i].id, true);
         }
         if (!isInstalled) updatedApps[i].status = false;
       } catch (e) {}
@@ -198,11 +202,21 @@ export default function App() {
     setLoading(true);
     const endpoint = isLoginMode ? '/api/login' : '/api/register';
     try {
-      // 🚀 FIX: परमानेंट UUID जेनरेट कर रहे हैं, जो फोन से कभी नहीं मिटेगा
-      let deviceId = await AsyncStorage.getItem('secure_device_id');
-      if (!deviceId) {
-        deviceId = "device_" + Date.now() + "_" + Math.floor(Math.random() * 1000000000);
-        await AsyncStorage.setItem('secure_device_id', deviceId);
+      
+      let deviceId = "";
+      
+      // 🚀 स्टेप 1: पहले फोन की असली ID निकालेंगे, ताकि तुम्हारा पुराना नंबर लॉगइन हो सके!
+      try { 
+        deviceId = await DeviceInfo.getUniqueId(); 
+      } catch (e) {}
+
+      // 🚀 स्टेप 2: अगर असली ID नहीं मिली, सिर्फ तब Permanent रैंडम ID यूज़ करेंगे!
+      if (!deviceId || deviceId === "unknown") {
+        deviceId = await AsyncStorage.getItem('secure_device_id');
+        if (!deviceId) {
+          deviceId = "device_" + Date.now() + "_" + Math.floor(Math.random() * 1000000000);
+          await AsyncStorage.setItem('secure_device_id', deviceId);
+        }
       }
 
       const response = await fetch(`${BACKEND_URL}${endpoint}`, {
