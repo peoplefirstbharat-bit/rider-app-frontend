@@ -357,6 +357,13 @@ public class AutoClickService extends AccessibilityService {
         dispatchGesture(swipeBuilder.build(), null, null);
     }
 
+    // 🚀 THE MISSING FUNCTION (यह मैंने गलती से हटा दिया था)
+    private void reportSuccessToApp() {
+        new Handler(Looper.getMainLooper()).post(() -> {
+            FilterBridgeModule.emitRideAccepted(detectedFare > 0 ? detectedFare : 0);
+        });
+    }
+
     @Override
     public void onInterrupt() {}
 }`;
