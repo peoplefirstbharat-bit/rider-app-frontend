@@ -14,7 +14,7 @@ module.exports = function withAndroidAutomator(config) {
     }
 
     const packagesToQuery = [
-        "com.olacabs.partner", "com.ubercab.driver", "com.rapido.passenger.to",
+        "com.olacabs.oladriver", "com.ubercab.driver", "com.rapido.rider",
         "in.juspay.nammayatripartner", "sinet.startup.inDriver", "com.blusmart.driver"
     ];
 
@@ -77,7 +77,6 @@ import android.provider.Settings;
 import android.os.PowerManager;
 import android.content.Context;
 import androidx.core.app.NotificationManagerCompat;
-import android.util.Log;
 import java.util.HashMap;
 
 public class FilterBridgeModule extends ReactContextBaseJavaModule {
@@ -198,6 +197,7 @@ public class FilterBridgePackage implements ReactPackage {
 import android.accessibilityservice.AccessibilityService;
 import android.accessibilityservice.GestureDescription;
 import android.graphics.Path;
+import android.graphics.Rect;
 import android.view.accessibility.AccessibilityEvent;
 import android.view.accessibility.AccessibilityNodeInfo;
 import android.os.Handler;
@@ -218,43 +218,45 @@ public class AutoClickService extends AccessibilityService {
         
         CharSequence pkgNameSeq = event.getPackageName();
         if (pkgNameSeq != null) {
-            String pkg = pkgNameSeq.toString();
+            String pkg = pkgNameSeq.toString().toLowerCase();
             String currentAppId = "";
-            if (pkg.contains("olacabs.partner")) currentAppId = "ola";
+            
+            // 🛡️ SECURITY LOCK: सिर्फ राइडिंग ऐप्स में चलेगा
+            if (pkg.contains("oladriver")) currentAppId = "ola";
             else if (pkg.contains("ubercab.driver")) currentAppId = "uber";
-            else if (pkg.contains("rapido.passenger")) currentAppId = "rapido";
+            else if (pkg.contains("rapido.rider")) currentAppId = "rapido";
             else if (pkg.contains("nammayatripartner")) currentAppId = "namma";
-            else if (pkg.contains("inDriver")) currentAppId = "indrive";
+            else if (pkg.contains("indriver")) currentAppId = "indrive";
             else if (pkg.contains("blusmart.driver")) currentAppId = "blusmart";
             
-            if (!currentAppId.isEmpty()) {
-                Boolean isAllowed = FilterBridgeModule.allowedApps.get(currentAppId);
-                if (isAllowed == null || !isAllowed) return; 
-            }
+            if (currentAppId.isEmpty()) return; 
+
+            Boolean isAllowed = FilterBridgeModule.allowedApps.get(currentAppId);
+            if (isAllowed == null || !isAllowed) return; 
+        } else {
+            return; 
         }
 
         AccessibilityNodeInfo rootNode = getRootInActiveWindow();
         if (rootNode != null) {
-            if (System.currentTimeMillis() - lastActionTime < 1500) return; // 1.5s Cooldown
+            if (System.currentTimeMillis() - lastActionTime < 2000) return; 
             
             detectedFare = 0;
             isCriteriaMet = false;
             isLocationMatched = FilterBridgeModule.savedLocation.isEmpty();
             
-            // 🚀 स्टेप 1: AI Brain - सिर्फ असली पैसे को पकड़ेगा!
+            // 🚀 STEP 1: पूरी स्क्रीन स्कैन करके पैसे और लोकेशन पकड़ो
             analyzeScreen(rootNode);
             
-            // 🚀 स्टेप 2: Hunter Mode - अगर पैसा मैच हुआ तो वार करो!
+            // 🚀 STEP 2: अगर राइड काम की है, तो 'रीड एंड रियेक्ट' वाला दिमाग लगाओ
             if (isCriteriaMet && isLocationMatched) {
-                boolean clickedByKeyword = huntAndAccept(rootNode);
+                boolean actionDone = findAndExecuteAction(rootNode);
                 
-                // अगर 'Accept' या 'Swipe' शब्द नहीं मिला, तो ज़बरदस्ती नीचे टैप और स्वाइप मारो (Uber/Ola के लिए)
-                if (!clickedByKeyword) {
-                    forceAcceptAction();
+                if (actionDone) {
+                    lastActionTime = System.currentTimeMillis();
+                    FilterBridgeModule.isServiceRunning = false; // 🔒 Auto-Sleep Mode ON
+                    reportSuccessToApp();
                 }
-                
-                lastActionTime = System.currentTimeMillis();
-                reportSuccessToApp();
             }
         }
     }
@@ -263,7 +265,7 @@ public class AutoClickService extends AccessibilityService {
         if (node == null) return;
         
         extractFareAndLocation(node.getText());
-        extractFareAndLocation(node.getContentDescription()); // अदृश्य टेक्स्ट भी पढ़ेगा
+        extractFareAndLocation(node.getContentDescription()); 
         
         for (int i = 0; i < node.getChildCount(); i++) {
             analyzeScreen(node.getChild(i));
@@ -280,7 +282,6 @@ public class AutoClickService extends AccessibilityService {
 
         if (text.contains("₹") || text.contains("rs") || text.contains("inr")) {
             try {
-                // 🚀 असली गॉड मोड Regex: यह सिर्फ ₹ के बगल वाले नंबर को पकड़ेगा! (जैसे 150.50)
                 Pattern p1 = Pattern.compile("(?:₹|rs\\\\.?|inr)\\s*([0-9]+(?:\\\\.[0-9]+)?)");
                 Matcher m1 = p1.matcher(text);
                 
@@ -303,61 +304,80 @@ public class AutoClickService extends AccessibilityService {
         }
     }
 
-    private boolean huntAndAccept(AccessibilityNodeInfo node) {
+    // 🧠 THE SMART BRAIN: स्क्रीन को पढ़कर सही फैसला लेगा
+    private boolean findAndExecuteAction(AccessibilityNodeInfo node) {
         if (node == null) return false;
+
         CharSequence textSeq = node.getText();
         CharSequence descSeq = node.getContentDescription();
-        
         String t = textSeq != null ? textSeq.toString().toLowerCase() : "";
         String d = descSeq != null ? descSeq.toString().toLowerCase() : "";
         String combined = t + " " + d;
 
+        // 🟢 लॉजिक 1: क्या बटन पर "स्वाइप/स्लाइड" लिखा है? -> तो सिर्फ स्वाइप मारो
         if (combined.contains("slide") || combined.contains("swipe") || combined.contains("स्लाइड")) {
-            forceAcceptAction(); // स्वाइप वाले में सीधे फ़ोर्स एक्शन चलाओ
+            performCalculatedSwipe();
             return true;
         }
-        
-        if (combined.contains("accept") || combined.contains("स्वीकार") || combined.contains("pick") || combined.contains("go")) {
-            AccessibilityNodeInfo current = node;
-            while (current != null) {
-                if (current.isClickable()) {
-                    current.performAction(AccessibilityNodeInfo.ACTION_CLICK);
-                    return true;
-                }
-                current = current.getParent(); 
+
+        // 🟢 लॉजिक 2: क्या बटन पर "Accept/Pick" लिखा है? -> तो उस असली बटन को ढूँढकर सिर्फ क्लिक करो
+        if (combined.contains("accept") || combined.contains("स्वीकार") || combined.contains("pick") || combined.contains("go") || combined.contains("ok")) {
+            AccessibilityNodeInfo clickableNode = getClickableParent(node);
+            if (clickableNode != null) {
+                clickableNode.performAction(AccessibilityNodeInfo.ACTION_CLICK);
+                return true;
             }
         }
-        
+
+        // स्क्रीन के अंदर के सारे बटन्स चेक करो
         for (int i = 0; i < node.getChildCount(); i++) {
-            if (huntAndAccept(node.getChild(i))) return true;
+            if (findAndExecuteAction(node.getChild(i))) return true;
         }
+
+        // 🟢 लॉजिक 3: स्मार्ट फॉलबैक (अगर बटन पर कुछ नहीं लिखा, जैसे Uber में होता है)
+        // यह चेक करेगा कि क्या स्क्रीन के बिल्कुल नीचे कोई बहुत बड़ा 'क्लिकेबल' बॉक्स है? अगर है, तो उसे क्लिक कर देगा।
+        if (node.isClickable()) {
+            Rect bounds = new Rect();
+            node.getBoundsInScreen(bounds);
+            DisplayMetrics metrics = getResources().getDisplayMetrics();
+            
+            // अगर यह डिब्बा स्क्रीन के निचले 30% हिस्से में है और बहुत चौड़ा है (Full-width button)
+            if (bounds.bottom > metrics.heightPixels * 0.7 && bounds.width() > metrics.widthPixels * 0.3) {
+                node.performAction(AccessibilityNodeInfo.ACTION_CLICK);
+                return true;
+            }
+        }
+
         return false;
     }
 
-    // 🚀 THE ULTIMATE WEAPON: अगर बटन नहीं मिल रहा तो स्क्रीन के नीचे ज़बरदस्ती वार करो!
-    private void forceAcceptAction() {
+    // यह फंक्शन टेक्स्ट से लेकर उसके असली "क्लिकेबल" डिब्बे तक पहुँचने का काम करता है
+    private AccessibilityNodeInfo getClickableParent(AccessibilityNodeInfo node) {
+        AccessibilityNodeInfo current = node;
+        while (current != null) {
+            if (current.isClickable()) {
+                return current;
+            }
+            current = current.getParent();
+        }
+        return null;
+    }
+
+    // परफेक्ट और नाप-तौल कर किया गया स्वाइप
+    private void performCalculatedSwipe() {
         DisplayMetrics metrics = getResources().getDisplayMetrics();
-        float startX = metrics.widthPixels * 0.1f;
-        float endX = metrics.widthPixels * 0.9f;
-        float y = metrics.heightPixels * 0.85f; // स्क्रीन के नीचे 85% हिस्से पर (जहाँ बटन होता है)
+        float startX = metrics.widthPixels * 0.15f;
+        float endX = metrics.widthPixels * 0.85f;
+        float y = metrics.heightPixels * 0.85f; 
 
-        // 1. पहला वार: बीच में ज़ोर से टैप करो (Uber के लिए)
-        Path tapPath = new Path();
-        tapPath.moveTo(metrics.widthPixels / 2f, y);
-        GestureDescription.Builder tapBuilder = new GestureDescription.Builder();
-        tapBuilder.addStroke(new GestureDescription.StrokeDescription(tapPath, 0, 50));
-        dispatchGesture(tapBuilder.build(), null, null);
-
-        // 2. दूसरा वार: तुरंत बाद एक लम्बा स्वाइप मारो (Ola / InDrive के लिए)
         Path swipePath = new Path();
         swipePath.moveTo(startX, y);
         swipePath.lineTo(endX, y);
         GestureDescription.Builder swipeBuilder = new GestureDescription.Builder();
-        swipeBuilder.addStroke(new GestureDescription.StrokeDescription(swipePath, 100, 200));
+        swipeBuilder.addStroke(new GestureDescription.StrokeDescription(swipePath, 0, 150));
         dispatchGesture(swipeBuilder.build(), null, null);
     }
 
-    // 🚀 THE MISSING FUNCTION (यह मैंने गलती से हटा दिया था)
     private void reportSuccessToApp() {
         new Handler(Looper.getMainLooper()).post(() -> {
             FilterBridgeModule.emitRideAccepted(detectedFare > 0 ? detectedFare : 0);
