@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { View, Text, TextInput, TouchableOpacity, StyleSheet, StatusBar, Alert, ActivityIndicator, ScrollView, Switch, Image, Linking, Platform, NativeModules, AppState, DeviceEventEmitter } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import DeviceInfo from 'react-native-device-info'; // 🚀 इसे वापस ले आये, पुराने अकाउंट्स को जिन्दा करने के लिए!
+import DeviceInfo from 'react-native-device-info';
 
 const BACKEND_URL = "https://ride-auto-backend.onrender.com";
 const { FilterBridge } = NativeModules;
@@ -35,10 +35,11 @@ export default function App() {
 
   const [perms, setPerms] = useState({ accessibility: false, overlay: false, battery: false, notifications: false });
 
+  // 🚀 फिक्स: तुम्हारे वाले सही पैकेज नाम वापस डाल दिए हैं!
   const [appsStatus, setAppsStatus] = useState([
-    { id: 'ola', name: 'Ola', desc: 'Cab / Auto', pkg: 'com.olacabs.partner', installed: false, status: false },
+    { id: 'ola', name: 'Ola', desc: 'Cab / Auto', pkg: 'com.olacabs.oladriver', installed: false, status: false },
     { id: 'uber', name: 'Uber', desc: 'Cab / Moto', pkg: 'com.ubercab.driver', installed: false, status: false },
-    { id: 'rapido', name: 'Rapido', desc: 'Bike taxi', pkg: 'com.rapido.passenger.to', installed: false, status: false },
+    { id: 'rapido', name: 'Rapido', desc: 'Bike taxi', pkg: 'com.rapido.rider', installed: false, status: false },
     { id: 'namma', name: 'Namma Yatri', desc: 'Auto / Taxi', pkg: 'in.juspay.nammayatripartner', installed: false, status: false },
     { id: 'indrive', name: 'inDrive', desc: 'Ride sharing', pkg: 'sinet.startup.inDriver', installed: false, status: false },
     { id: 'blusmart', name: 'BluSmart', desc: 'EV cab', pkg: 'com.blusmart.driver', installed: false, status: false },
@@ -89,7 +90,7 @@ export default function App() {
           accessibility: permsStatus.accessibility,
           overlay: permsStatus.overlay,
           battery: permsStatus.battery,
-          notifications: permsStatus.notifications // 🚀 अब Notifications का भी असली सच पता चलेगा!
+          notifications: permsStatus.notifications 
         }));
       }
     } catch (e) {}
@@ -108,7 +109,6 @@ export default function App() {
         if (savedAppStatus !== null) {
           updatedApps[i].status = savedAppStatus === 'true';
         } else {
-          // 🚀 Default Allowed Fix: अब कोई भी ऐप पहली बार में 'Allowed' ही रहेगा!
           updatedApps[i].status = true; 
         }
         
@@ -205,12 +205,10 @@ export default function App() {
       
       let deviceId = "";
       
-      // 🚀 स्टेप 1: पहले फोन की असली ID निकालेंगे, ताकि तुम्हारा पुराना नंबर लॉगइन हो सके!
       try { 
         deviceId = await DeviceInfo.getUniqueId(); 
       } catch (e) {}
 
-      // 🚀 स्टेप 2: अगर असली ID नहीं मिली, सिर्फ तब Permanent रैंडम ID यूज़ करेंगे!
       if (!deviceId || deviceId === "unknown") {
         deviceId = await AsyncStorage.getItem('secure_device_id');
         if (!deviceId) {
