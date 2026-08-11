@@ -35,7 +35,6 @@ export default function App() {
 
   const [perms, setPerms] = useState({ accessibility: false, overlay: false, battery: false, notifications: false });
 
-  // 🚀 फिक्स: तुम्हारे वाले सही पैकेज नाम वापस डाल दिए हैं!
   const [appsStatus, setAppsStatus] = useState([
     { id: 'ola', name: 'Ola', desc: 'Cab / Auto', pkg: 'com.olacabs.oladriver', installed: false, status: false },
     { id: 'uber', name: 'Uber', desc: 'Cab / Moto', pkg: 'com.ubercab.driver', installed: false, status: false },
@@ -46,7 +45,7 @@ export default function App() {
   ]);
 
   useEffect(() => {
-    const rideListener = DeviceEventEmitter.addListener('RideAccepted', (event) => {
+    const rideListener = DeviceEventEmitter.addListener('RideAccepted', async (event) => {
       const fare = event.fare || 0;
       setHistoryStats(prev => ({
         detected: prev.detected + 1,
@@ -54,6 +53,22 @@ export default function App() {
         value: prev.value + fare
       }));
       setRecentRides(prev => [{ id: Date.now(), fare, time: new Date().toLocaleTimeString() }, ...prev]);
+
+      // 🚀 THE BRAIN UPDATE 1: राइड उठते ही UI टॉगल OFF कर दो (जावा खुद को बंद कर चुका है)
+      setServiceOn(false);
+      await AsyncStorage.setItem('service_on', 'false');
+
+      // 🚀 THE BRAIN UPDATE 2: बैकएंड को खबर कर दो कि राइड उठ गई!
+      try {
+        const userPhone = await AsyncStorage.getItem('user_phone');
+        if (userPhone) {
+          fetch(`${BACKEND_URL}/api/ride-accepted`, { // 🔴 अगर तुम्हारे बैकएंड में कोई और API है तो नाम बदल लेना
+            method: 'POST', 
+            headers: { 'Content-Type': 'application/json' }, 
+            body: JSON.stringify({ phone: userPhone, fare: fare, timestamp: new Date().toISOString() })
+          }).catch(() => {});
+        }
+      } catch (e) {}
     });
     return () => rideListener.remove();
   }, []);
